@@ -2,159 +2,144 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Counter</title>
-<style>
-  :root {
-    color-scheme: light dark;
-    --bg: #0f172a;
-    --card: #1e293b;
-    --text: #e2e8f0;
-    --accent: #00e5ff;
-    --accent-hover: #4df2ff;
-    --danger: #ff5c7c;
-    --danger-hover: #ff7a94;
-  }
-
-  * {
-    box-sizing: border-box;
-  }
-
-  body {
-    margin: 0;
-    min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--bg);
-    font-family: 'Segoe UI', system-ui, sans-serif;
-  }
-
-  .card {
-    background: var(--card);
-    border-radius: 16px;
-    padding: 2.5rem 3rem;
-    text-align: center;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
-  }
-
-  h1 {
-    margin: 0 0 1.5rem;
-    color: var(--text);
-    font-size: 1.25rem;
-    font-weight: 500;
-    letter-spacing: 0.02em;
-  }
-
-  #count {
-    font-size: 4rem;
-    font-weight: 700;
-    color: var(--text);
-    margin: 0 0 2rem;
-    min-width: 3ch;
-    transition: transform 0.15s ease;
-  }
-
-  #count.bump {
-    transform: scale(1.15);
-  }
-
-  .buttons {
-    display: flex;
-    gap: 1rem;
-    justify-content: center;
-  }
-
-  button {
-    border: none;
-    border-radius: 10px;
-    padding: 0.75rem 1.5rem;
-    font-size: 1.5rem;
-    font-weight: 600;
-    cursor: pointer;
-    color: white;
-    transition: background 0.15s ease, transform 0.1s ease;
-  }
-
-  button:active {
-    transform: scale(0.95);
-  }
-
-  #decrement {
-    background: var(--danger);
-  }
-
-  #decrement:hover {
-    background: var(--danger-hover);
-  }
-
-  #increment {
-    background: var(--accent);
-    color: #0f172a;
-  }
-
-  #increment:hover {
-    background: var(--accent-hover);
-  }
-
-  #reset {
-    margin-top: 1.25rem;
-    background: transparent;
-    color: #94a3b8;
-    font-size: 0.9rem;
-    font-weight: 400;
-    padding: 0.4rem 1rem;
-    text-decoration: underline;
-  }
-
-  #reset:hover {
-    color: var(--text);
-    background: transparent;
-  }
-</style>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Döstädning — Estate Cleaning Catalog</title>
+<link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
 
-<div class="card">
-  <h1>Interactive Counter</h1>
-  <div id="count">0</div>
-  <div class="buttons">
-    <button id="decrement" aria-label="Decrease count">&minus;</button>
-    <button id="increment" aria-label="Increase count">&plus;</button>
+<header class="app-header">
+  <h1>Döstädning</h1>
+  <p class="subtitle">Swedish Death Cleaning — catalog, decide, hand it on</p>
+</header>
+
+<!-- CAPTURE VIEW -->
+<section id="view-capture" class="view">
+  <form id="capture-form" class="card" autocomplete="off">
+    <label for="f-photo">Photo</label>
+    <input type="file" id="f-photo" accept="image/*" capture="environment">
+    <img id="f-photo-preview" class="photo-preview" alt="Photo preview">
+
+    <label for="f-title">Item title</label>
+    <input type="text" id="f-title" placeholder="e.g. Marantz 2270 Receiver" required>
+
+    <label for="f-category">Category</label>
+    <select id="f-category">
+      <option>Electronics</option>
+      <option>Furniture</option>
+      <option>Audio Gear</option>
+      <option>Heirlooms</option>
+      <option>Clothing &amp; Accessories</option>
+      <option>Kitchen &amp; Household</option>
+      <option>Books &amp; Media</option>
+      <option>Sports &amp; Cycling Gear</option>
+      <option>Vehicles</option>
+      <option>Jewelry</option>
+      <option>Documents &amp; Records</option>
+      <option>Other</option>
+    </select>
+
+    <label for="f-disposition">Disposition</label>
+    <select id="f-disposition">
+      <option value="Keep">Keep — essential for daily living</option>
+      <option value="Gift">Gift / Designate</option>
+      <option value="Sell">Sell</option>
+      <option value="Donate">Donate / Recycle</option>
+      <option value="Discard">Discard</option>
+    </select>
+
+    <div id="f-gift-fields" class="disposition-fields" style="display:none;">
+      <label for="f-recipient">Recipient</label>
+      <input type="text" id="f-recipient" placeholder="Name of family member or friend">
+    </div>
+
+    <div id="f-sell-fields" class="disposition-fields" style="display:none;">
+      <label for="f-platform">Sale platform</label>
+      <input type="text" id="f-platform" placeholder="e.g. Carousell, Facebook Marketplace">
+      <label for="f-asking-price">Asking price</label>
+      <input type="number" id="f-asking-price" min="0" step="0.01" placeholder="0.00">
+    </div>
+
+    <div id="f-donate-fields" class="disposition-fields" style="display:none;">
+      <label for="f-donate-location">Charity / recycling facility</label>
+      <input type="text" id="f-donate-location" placeholder="e.g. Salvation Army, e-waste center">
+    </div>
+
+    <label for="f-value">Estimated value</label>
+    <input type="number" id="f-value" min="0" step="0.01" placeholder="0.00">
+
+    <div class="checkbox-row">
+      <input type="checkbox" id="f-has-proof">
+      <label for="f-has-proof">Have receipt / proof of purchase</label>
+    </div>
+
+    <label for="f-notes">Notes</label>
+    <textarea id="f-notes" placeholder="Sentimental notes, condition, why this item goes to this person..."></textarea>
+
+    <button type="submit" class="full">Save item</button>
+  </form>
+</section>
+
+<!-- DASHBOARD VIEW -->
+<section id="view-dashboard" class="view">
+  <div class="filter-chips" id="disposition-chips">
+    <button class="chip active" data-disposition="all">All</button>
+    <button class="chip" data-disposition="Keep">Keep</button>
+    <button class="chip" data-disposition="Gift">Gift</button>
+    <button class="chip" data-disposition="Sell">Sell</button>
+    <button class="chip" data-disposition="Donate">Donate</button>
+    <button class="chip" data-disposition="Discard">Discard</button>
   </div>
-  <button id="reset">Reset</button>
+
+  <div class="filters-row">
+    <select id="category-filter">
+      <option value="all">All categories</option>
+    </select>
+    <input type="text" id="search-filter" placeholder="Search items...">
+  </div>
+
+  <div id="item-list"></div>
+</section>
+
+<!-- EXPORT VIEW -->
+<section id="view-export" class="view">
+  <div class="summary-grid" id="summary-grid"></div>
+
+  <div class="card">
+    <h3>Estate &amp; loved ones summary</h3>
+    <p class="item-meta">Generate a printable digest grouped by disposition — a guide for executors and family showing where each item goes.</p>
+    <button id="btn-print" class="full">Print / Save as PDF</button>
+  </div>
+
+  <div class="card">
+    <h3>Backup &amp; restore</h3>
+    <p class="item-meta">Everything is stored only in this browser. Download a backup regularly, and keep it somewhere your executor can find it.</p>
+    <div class="btn-row">
+      <button id="btn-export-json" class="secondary">Download backup (.json)</button>
+      <button id="btn-import-json" class="secondary">Restore backup</button>
+    </div>
+    <input type="file" id="import-file-input" accept="application/json" style="display:none;">
+  </div>
+</section>
+
+<!-- TAB BAR -->
+<nav class="tab-bar">
+  <button class="tab-btn active" data-view="capture">Capture</button>
+  <button class="tab-btn" data-view="dashboard">Items</button>
+  <button class="tab-btn" data-view="export">Export</button>
+</nav>
+
+<!-- ITEM DETAIL / EDIT MODAL -->
+<div class="modal-overlay" id="item-modal">
+  <div class="modal-sheet" id="item-modal-content"></div>
 </div>
 
-<script>
-  const countEl = document.getElementById('count');
-  const incrementBtn = document.getElementById('increment');
-  const decrementBtn = document.getElementById('decrement');
-  const resetBtn = document.getElementById('reset');
+<div class="toast" id="toast"></div>
 
-  let count = 0;
+<!-- Hidden printable estate summary, populated before window.print() -->
+<div id="printable-summary"></div>
 
-  function render() {
-    countEl.textContent = count;
-    countEl.classList.remove('bump');
-    void countEl.offsetWidth;
-    countEl.classList.add('bump');
-  }
-
-  incrementBtn.addEventListener('click', () => {
-    count++;
-    render();
-  });
-
-  decrementBtn.addEventListener('click', () => {
-    count--;
-    render();
-  });
-
-  resetBtn.addEventListener('click', () => {
-    count = 0;
-    render();
-  });
-</script>
-
+<script src="js/db.js"></script>
+<script src="js/app.js"></script>
 </body>
 </html>
