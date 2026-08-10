@@ -131,6 +131,12 @@
     </div>
     <input type="file" id="import-file-input" accept="application/json" style="display:none;">
   </div>
+
+  <div class="card">
+    <h3>Google Drive sync</h3>
+    <p class="item-meta">Upload photos/videos to a Drive folder you choose and log each item to a Google Sheet, signed in as you — no server involved.</p>
+    <div id="google-sync-body"></div>
+  </div>
 </section>
 
 <!-- TAB BAR -->
@@ -181,7 +187,15 @@
   </div>
 </div>
 
+<!-- Google Identity Services (sign-in) and the classic API loader (Drive folder picker) -->
+<script src="https://accounts.google.com/gsi/client"></script>
+<script src="https://apis.google.com/js/api.js"></script>
+
 <script src="js/db.js"></script>
+<!-- js/google-config.js is gitignored and may not exist until you set it up (see README) —
+     that's fine, google-sync.js degrades gracefully without it. -->
+<script src="js/google-config.js"></script>
+<script src="js/google-sync.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

@@ -603,6 +603,15 @@ function openItemModal(id) {
     extraLines.push(`<div class="item-meta" style="margin-top:0.5rem;">${escapeHtml(asset.notes)}</div>`);
   }
 
+  const googleConfigured = window.GoogleSync && GoogleSync.isConfigured();
+  const synced = googleConfigured && isAssetSynced(asset);
+  const googleSyncHtml = googleConfigured
+    ? `<div class="btn-row" style="margin-bottom:0.5rem;">
+         <button type="button" class="secondary full" id="modal-google-sync-btn">${synced ? 'Re-sync to Google Drive' : 'Sync to Google Drive'}</button>
+       </div>
+       ${synced ? '<p class="item-meta" style="margin-top:-0.25rem;margin-bottom:1rem;">Synced to Google Drive/Sheet.</p>' : '<div style="margin-bottom:1rem;"></div>'}`
+    : '';
+
   modalContent.innerHTML = `
     <button class="modal-close" id="modal-close-btn">Close</button>
     <h3>${escapeHtml(asset.title)}</h3>
@@ -612,6 +621,7 @@ function openItemModal(id) {
       <button type="button" class="secondary" id="modal-gallery-btn">Choose from Gallery</button>
     </div>
     <input type="file" id="modal-media-input" accept="image/*,video/*" multiple style="display:none;">
+    ${googleSyncHtml}
     <span class="badge ${DISPOSITION_CLASS[asset.dispositionType]}">${asset.dispositionType}</span>
     <div class="item-meta" style="margin-top:0.5rem;">${escapeHtml(asset.category)}</div>
     ${extraLines.join('')}
@@ -632,6 +642,24 @@ function openItemModal(id) {
     modalMediaInput.value = '';
     if (items.length) attachMediaToAsset(asset.id, items);
   });
+  const syncBtn = modalContent.querySelector('#modal-google-sync-btn');
+  if (syncBtn) {
+    syncBtn.addEventListener('click', async () => {
+      syncBtn.disabled = true;
+      const originalText = syncBtn.textContent;
+      try {
+        await GoogleSync.syncAsset(asset, (i, total) => { syncBtn.textContent = `Uploading ${i}/${total}…`; });
+        await AssetDB.put(asset);
+        showToast('Synced "' + asset.title + '" to Google Drive');
+        await loadAssets();
+        openItemModal(asset.id);
+      } catch (err) {
+        showToast(err.message);
+        syncBtn.disabled = false;
+        syncBtn.textContent = originalText;
+      }
+    });
+  }
   modalContent.querySelector('#modal-delete-btn').addEventListener('click', () => {
     if (confirm(`Delete "${asset.title}"? This can't be undone.`)) {
       AssetDB.delete(asset.id).then(() => {
@@ -667,6 +695,7 @@ function renderExportSummary() {
       </div>
     `;
   }).join('');
+  renderGoogleSyncCard();
 }
 
 document.getElementById('btn-print').addEventListener('click', () => {
@@ -725,6 +754,113 @@ function printItemLine(asset) {
 
   const notes = asset.notes ? ` — ${escapeHtml(asset.notes)}` : '';
   return `<div class="print-item"><strong>${escapeHtml(asset.title)}</strong> (${escapeHtml(bits.join(', '))})${notes}</div>`;
+}
+
+// ---------- Google Drive sync ----------
+
+function isAssetSynced(asset) {
+  if (!asset.driveSyncedAt) return false;
+  const media = asset.media || [];
+  return media.every((m) => !!m.driveUrl);
+}
+
+function renderGoogleSyncCard() {
+  const container = document.getElementById('google-sync-body');
+  if (!container) return;
+
+  if (!window.GoogleSync || !GoogleSync.isConfigured()) {
+    container.innerHTML = '<p class="item-meta">Not set up yet. Copy <code>js/google-config.example.js</code> to <code>js/google-config.js</code>, fill in your Google Client ID and API key, and reload — see README.md for the full setup steps.</p>';
+    return;
+  }
+
+  const settings = GoogleSync.getSettings();
+
+  if (!GoogleSync.isConnected()) {
+    container.innerHTML = '<button type="button" class="full" id="google-connect-btn">Connect Google Account</button>';
+    container.querySelector('#google-connect-btn').addEventListener('click', async () => {
+      try {
+        await GoogleSync.connect();
+        showToast('Connected to Google');
+      } catch (err) {
+        showToast(err.message);
+      }
+      renderGoogleSyncCard();
+    });
+    return;
+  }
+
+  const pendingCount = assets.filter((a) => !isAssetSynced(a)).length;
+
+  container.innerHTML = `
+    <div class="item-meta">Connected to Google <button type="button" class="secondary" id="google-disconnect-btn" style="padding:0.2rem 0.6rem; margin-left:0.5rem;">Disconnect</button></div>
+    <div class="item-meta" style="margin-top:0.75rem;">Folder: ${settings.folderName ? escapeHtml(settings.folderName) : '<em>not chosen</em>'}</div>
+    <button type="button" class="secondary full" id="google-folder-btn">${settings.folderId ? 'Change folder' : 'Choose Drive folder'}</button>
+    <div class="item-meta" style="margin-top:0.75rem;">Sheet: ${settings.sheetName ? escapeHtml(settings.sheetName) : '<em>not connected</em>'}</div>
+    <div class="btn-row">
+      <input type="text" id="google-sheet-input" placeholder="Paste existing Sheet URL or ID">
+    </div>
+    <div class="btn-row">
+      <button type="button" class="secondary" id="google-sheet-connect-btn">Connect sheet</button>
+      <button type="button" class="secondary" id="google-sheet-create-btn">Create new sheet</button>
+    </div>
+    <button type="button" class="full" id="google-sync-all-btn" ${settings.folderId ? '' : 'disabled'}>Sync all items (${pendingCount} pending)</button>
+  `;
+
+  container.querySelector('#google-disconnect-btn').addEventListener('click', () => {
+    GoogleSync.disconnect();
+    renderGoogleSyncCard();
+  });
+
+  container.querySelector('#google-folder-btn').addEventListener('click', async () => {
+    try {
+      const folder = await GoogleSync.chooseFolder();
+      if (folder) showToast('Folder set to "' + folder.name + '"');
+    } catch (err) {
+      showToast(err.message);
+    }
+    renderGoogleSyncCard();
+  });
+
+  container.querySelector('#google-sheet-connect-btn').addEventListener('click', async () => {
+    const input = container.querySelector('#google-sheet-input').value.trim();
+    if (!input) { showToast('Paste a sheet URL or ID first'); return; }
+    try {
+      const sheet = await GoogleSync.connectExistingSheet(input);
+      showToast('Connected to "' + sheet.name + '"');
+    } catch (err) {
+      showToast(err.message);
+    }
+    renderGoogleSyncCard();
+  });
+
+  container.querySelector('#google-sheet-create-btn').addEventListener('click', async () => {
+    try {
+      const sheet = await GoogleSync.createNewSheet();
+      showToast('Created "' + sheet.name + '"');
+    } catch (err) {
+      showToast(err.message);
+    }
+    renderGoogleSyncCard();
+  });
+
+  container.querySelector('#google-sync-all-btn').addEventListener('click', async () => {
+    const btn = container.querySelector('#google-sync-all-btn');
+    const pending = assets.filter((a) => !isAssetSynced(a));
+    let done = 0;
+    for (const asset of pending) {
+      btn.textContent = `Syncing "${asset.title}"… (${done + 1}/${pending.length})`;
+      try {
+        await GoogleSync.syncAsset(asset);
+        await AssetDB.put(asset);
+        done++;
+      } catch (err) {
+        showToast('Stopped on "' + asset.title + '": ' + err.message);
+        break;
+      }
+    }
+    showToast(`Synced ${done} of ${pending.length} item${pending.length === 1 ? '' : 's'}`);
+    await loadAssets();
+  });
 }
 
 // ---------- backup / restore ----------
