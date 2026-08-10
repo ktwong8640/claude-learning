@@ -68,7 +68,9 @@ Uploads photos/videos to a Google Drive folder you choose and logs each item's T
 cp js/google-config.example.js js/google-config.js
 ```
 
-Fill in the `clientId` and `apiKey` you just created. `js/google-config.js` is gitignored — it never gets committed. (`.env.example` at the repo root documents the same two values for reference, but nothing reads a `.env` file here — see the comment in that file for why.)
+Fill in the `clientId` and `apiKey` you just created, and commit the file — GitHub Pages only serves what's actually in the repo, and there's no build step to inject secrets at deploy time, so this needs to be a real committed file. That's fine: neither value is meant to be kept private (see the comment in `js/google-config.js` itself). **Never put a Client Secret in this file or anywhere in this repo** — this app's client-side OAuth flow doesn't use one, and unlike the Client ID/API key, a secret genuinely needs protecting.
+
+If you'd rather keep these two values out of your repo's history entirely, add `js/google-config.js` back to `.gitignore` and inject it at deploy time instead (e.g. via a GitHub Actions secret written into the Pages workflow) — a bit more setup, but keeps the file out of your public git history. (`.env.example` at the repo root documents the same two values for reference either way, but nothing reads a `.env` file here — see the comment in that file for why.)
 
 ### Using it
 
