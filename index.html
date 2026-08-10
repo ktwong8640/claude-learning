@@ -2,9 +2,16 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0">
 <title>Döstädning — Estate Cleaning Catalog</title>
 <link rel="stylesheet" href="css/styles.css">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
 <body>
 
@@ -16,8 +23,12 @@
 <!-- CAPTURE VIEW -->
 <section id="view-capture" class="view">
   <form id="capture-form" class="card" autocomplete="off">
-    <label for="f-photo">Photo</label>
-    <input type="file" id="f-photo" accept="image/*" capture="environment">
+    <label>Photo</label>
+    <div class="btn-row">
+      <button type="button" id="btn-open-camera" class="secondary">Take Photo</button>
+      <button type="button" id="btn-choose-file" class="secondary">Choose from Gallery</button>
+    </div>
+    <input type="file" id="f-photo" accept="image/*" style="display:none;">
     <img id="f-photo-preview" class="photo-preview" alt="Photo preview">
 
     <label for="f-title">Item title</label>
@@ -138,6 +149,27 @@
 
 <!-- Hidden printable estate summary, populated before window.print() -->
 <div id="printable-summary"></div>
+
+<!-- Live camera capture overlay -->
+<div class="camera-overlay" id="camera-overlay">
+  <video id="camera-video" autoplay playsinline muted></video>
+  <canvas id="camera-canvas" style="display:none;"></canvas>
+
+  <img id="camera-review-img" class="camera-review-img" alt="Captured photo">
+
+  <p class="camera-error" id="camera-error"></p>
+
+  <div class="camera-controls" id="camera-live-controls">
+    <button type="button" class="secondary" id="camera-cancel">Cancel</button>
+    <button type="button" class="shutter-btn" id="camera-shutter" aria-label="Take photo"></button>
+    <button type="button" class="secondary" id="camera-switch">Flip</button>
+  </div>
+
+  <div class="camera-controls" id="camera-review-controls" style="display:none;">
+    <button type="button" class="secondary" id="camera-retake">Retake</button>
+    <button type="button" id="camera-use">Use Photo</button>
+  </div>
+</div>
 
 <script src="js/db.js"></script>
 <script src="js/app.js"></script>

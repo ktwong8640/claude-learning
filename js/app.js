@@ -88,17 +88,23 @@ updateDispositionFields();
 const photoInput = document.getElementById('f-photo');
 const photoPreview = document.getElementById('f-photo-preview');
 
-photoInput.addEventListener('change', () => {
-  const file = photoInput.files[0];
-  if (!file) {
-    capturedPhotoBlob = null;
+function setCapturedPhoto(blob) {
+  capturedPhotoBlob = blob;
+  if (!blob) {
     photoPreview.classList.remove('show');
     return;
   }
-  capturedPhotoBlob = file;
-  const url = trackObjectUrl(URL.createObjectURL(file));
+  const url = trackObjectUrl(URL.createObjectURL(blob));
   photoPreview.src = url;
   photoPreview.classList.add('show');
+}
+
+photoInput.addEventListener('change', () => {
+  setCapturedPhoto(photoInput.files[0] || null);
+});
+
+document.getElementById('btn-choose-file').addEventListener('click', () => {
+  photoInput.click();
 });
 
 document.getElementById('capture-form').addEventListener('submit', (e) => {
@@ -133,10 +139,139 @@ document.getElementById('capture-form').addEventListener('submit', (e) => {
 
 function resetCaptureForm() {
   document.getElementById('capture-form').reset();
-  capturedPhotoBlob = null;
-  photoPreview.classList.remove('show');
+  setCapturedPhoto(null);
   updateDispositionFields();
 }
+
+// ---------- live camera capture ----------
+// Opens an in-page viewfinder via getUserMedia (rear camera by default) instead of
+// handing off to the OS file picker. Requires a secure context (https:// or localhost) —
+// browsers refuse camera access on plain http:// or file://.
+
+const cameraOverlay = document.getElementById('camera-overlay');
+const cameraVideo = document.getElementById('camera-video');
+const cameraCanvas = document.getElementById('camera-canvas');
+const cameraReviewImg = document.getElementById('camera-review-img');
+const cameraErrorEl = document.getElementById('camera-error');
+
+let cameraStream = null;
+let cameraFacingMode = 'environment';
+let pendingCaptureBlob = null;
+let pendingCaptureUrl = null;
+
+function cameraSupported() {
+  return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+}
+
+function showCameraError(message) {
+  cameraErrorEl.textContent = message;
+  cameraErrorEl.classList.add('show');
+}
+
+function hideCameraError() {
+  cameraErrorEl.classList.remove('show');
+}
+
+async function startCameraStream() {
+  hideCameraError();
+  stopCameraStream();
+  try {
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: cameraFacingMode } },
+      audio: false,
+    });
+    cameraVideo.srcObject = cameraStream;
+  } catch (err) {
+    let message = 'Could not access the camera (' + err.name + ').';
+    if (err.name === 'NotAllowedError') {
+      message = 'Camera permission was denied. Allow camera access for this site, or use "Choose from Gallery" instead.';
+    } else if (err.name === 'NotFoundError') {
+      message = 'No camera was found on this device.';
+    } else if (!window.isSecureContext) {
+      message = 'Camera access needs a secure connection (https://). Serve this app over HTTPS, or use "Choose from Gallery" instead.';
+    }
+    showCameraError(message);
+  }
+}
+
+function stopCameraStream() {
+  if (cameraStream) {
+    cameraStream.getTracks().forEach((track) => track.stop());
+    cameraStream = null;
+  }
+}
+
+function openCamera() {
+  if (!cameraSupported()) {
+    showToast('Live camera isn\'t supported here — using Choose from Gallery instead.');
+    photoInput.setAttribute('capture', 'environment');
+    photoInput.click();
+    return;
+  }
+  cameraOverlay.classList.remove('reviewing');
+  cameraOverlay.classList.add('show');
+  document.getElementById('camera-live-controls').style.display = 'flex';
+  document.getElementById('camera-review-controls').style.display = 'none';
+  startCameraStream();
+}
+
+function closeCamera() {
+  stopCameraStream();
+  cameraOverlay.classList.remove('show', 'reviewing');
+  hideCameraError();
+  if (pendingCaptureUrl) {
+    URL.revokeObjectURL(pendingCaptureUrl);
+    pendingCaptureUrl = null;
+  }
+  pendingCaptureBlob = null;
+}
+
+function capturePhoto() {
+  if (!cameraVideo.videoWidth) return;
+  cameraCanvas.width = cameraVideo.videoWidth;
+  cameraCanvas.height = cameraVideo.videoHeight;
+  cameraCanvas.getContext('2d').drawImage(cameraVideo, 0, 0);
+  cameraCanvas.toBlob((blob) => {
+    if (!blob) return;
+    pendingCaptureBlob = blob;
+    pendingCaptureUrl = URL.createObjectURL(blob);
+    cameraReviewImg.src = pendingCaptureUrl;
+    cameraOverlay.classList.add('reviewing');
+    document.getElementById('camera-live-controls').style.display = 'none';
+    document.getElementById('camera-review-controls').style.display = 'flex';
+  }, 'image/jpeg', 0.9);
+}
+
+function retakePhoto() {
+  if (pendingCaptureUrl) {
+    URL.revokeObjectURL(pendingCaptureUrl);
+    pendingCaptureUrl = null;
+  }
+  pendingCaptureBlob = null;
+  cameraOverlay.classList.remove('reviewing');
+  document.getElementById('camera-live-controls').style.display = 'flex';
+  document.getElementById('camera-review-controls').style.display = 'none';
+}
+
+function usePhoto() {
+  if (pendingCaptureBlob) setCapturedPhoto(pendingCaptureBlob);
+  if (pendingCaptureUrl) {
+    URL.revokeObjectURL(pendingCaptureUrl);
+    pendingCaptureUrl = null;
+  }
+  pendingCaptureBlob = null;
+  closeCamera();
+}
+
+document.getElementById('btn-open-camera').addEventListener('click', openCamera);
+document.getElementById('camera-cancel').addEventListener('click', closeCamera);
+document.getElementById('camera-shutter').addEventListener('click', capturePhoto);
+document.getElementById('camera-retake').addEventListener('click', retakePhoto);
+document.getElementById('camera-use').addEventListener('click', usePhoto);
+document.getElementById('camera-switch').addEventListener('click', () => {
+  cameraFacingMode = cameraFacingMode === 'environment' ? 'user' : 'environment';
+  startCameraStream();
+});
 
 // ---------- dashboard ----------
 
@@ -437,3 +572,12 @@ function loadAssets() {
 
 switchView('capture');
 loadAssets();
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {
+      // Offline/installable support is a nice-to-have; ignore registration failures
+      // (e.g. when running over plain http:// during local development).
+    });
+  });
+}
