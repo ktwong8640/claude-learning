@@ -23,13 +23,13 @@
 <!-- CAPTURE VIEW -->
 <section id="view-capture" class="view">
   <form id="capture-form" class="card" autocomplete="off">
-    <label>Photo</label>
+    <label>Photos &amp; videos</label>
     <div class="btn-row">
-      <button type="button" id="btn-open-camera" class="secondary">Take Photo</button>
+      <button type="button" id="btn-open-camera" class="secondary">Camera</button>
       <button type="button" id="btn-choose-file" class="secondary">Choose from Gallery</button>
     </div>
-    <input type="file" id="f-photo" accept="image/*" style="display:none;">
-    <img id="f-photo-preview" class="photo-preview" alt="Photo preview">
+    <input type="file" id="f-media-input" accept="image/*,video/*" multiple style="display:none;">
+    <div id="media-preview-list" class="media-preview-list"></div>
 
     <label for="f-title">Item title</label>
     <input type="text" id="f-title" placeholder="e.g. Marantz 2270 Receiver" required>
@@ -156,6 +156,16 @@
   <canvas id="camera-canvas" style="display:none;"></canvas>
 
   <img id="camera-review-img" class="camera-review-img" alt="Captured photo">
+  <video id="camera-review-video" class="camera-review-img" controls playsinline></video>
+
+  <div class="camera-mode-toggle" id="camera-mode-toggle">
+    <button type="button" class="chip active" data-mode="photo" id="camera-mode-photo">Photo</button>
+    <button type="button" class="chip" data-mode="video" id="camera-mode-video">Video</button>
+  </div>
+
+  <div class="camera-rec-indicator" id="camera-rec-indicator">
+    <span class="camera-rec-dot"></span> <span id="camera-rec-time">0:00</span>
+  </div>
 
   <p class="camera-error" id="camera-error"></p>
 
@@ -167,7 +177,7 @@
 
   <div class="camera-controls" id="camera-review-controls" style="display:none;">
     <button type="button" class="secondary" id="camera-retake">Retake</button>
-    <button type="button" id="camera-use">Use Photo</button>
+    <button type="button" id="camera-use">Use</button>
   </div>
 </div>
 

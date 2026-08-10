@@ -1,7 +1,7 @@
 // Minimal app-shell cache so the page installs on Android and loads offline.
 // User data (items, photos) lives in IndexedDB, not here — this only caches static files.
 
-const CACHE_NAME = 'dostadning-shell-v1';
+const CACHE_NAME = 'dostadning-shell-v2';
 const SHELL_FILES = [
   './',
   './index.html',

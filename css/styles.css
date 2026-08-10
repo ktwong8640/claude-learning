@@ -158,18 +158,63 @@ input[type="file"] {
   margin: 0;
 }
 
-.photo-preview {
+/* Media (photo/video) previews */
+
+.media-preview-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
   margin-top: 0.75rem;
-  width: 100%;
-  max-height: 220px;
-  object-fit: contain;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  display: none;
 }
 
-.photo-preview.show {
-  display: block;
+.media-thumb-wrap {
+  position: relative;
+  width: 84px;
+  height: 84px;
+  flex-shrink: 0;
+}
+
+.media-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #0f172a;
+}
+
+.media-thumb-badge {
+  position: absolute;
+  bottom: 4px;
+  left: 4px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+}
+
+.media-thumb-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--danger);
+  color: #fff;
+  font-size: 1rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.media-thumb-remove:hover {
+  background: var(--danger-hover);
 }
 
 button {
@@ -303,6 +348,11 @@ button.full {
   background: var(--card-hover);
 }
 
+.item-thumb-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
 .item-thumb {
   width: 56px;
   height: 56px;
@@ -310,7 +360,7 @@ button.full {
   object-fit: cover;
   background: #0f172a;
   border: 1px solid var(--border);
-  flex-shrink: 0;
+  display: block;
 }
 
 .item-thumb.placeholder {
@@ -320,6 +370,24 @@ button.full {
   color: var(--muted);
   font-size: 0.7rem;
   text-align: center;
+}
+
+.media-count-badge {
+  position: absolute;
+  bottom: -4px;
+  right: -4px;
+  background: var(--accent);
+  color: #0f172a;
+  font-size: 0.65rem;
+  font-weight: 700;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--bg);
 }
 
 .item-info {
@@ -373,13 +441,47 @@ button.full {
   padding: 1.1rem;
 }
 
-.modal-sheet img {
+.modal-gallery {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.modal-gallery-item {
+  position: relative;
+  aspect-ratio: 1;
+}
+
+.modal-gallery-item img,
+.modal-gallery-item video {
   width: 100%;
-  max-height: 260px;
-  object-fit: contain;
+  height: 100%;
+  object-fit: cover;
   border-radius: 10px;
   border: 1px solid var(--border);
-  margin-bottom: 0.75rem;
+  background: #0f172a;
+}
+
+.modal-gallery-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--danger);
+  color: #fff;
+  font-size: 1rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-gallery-remove:hover {
+  background: var(--danger-hover);
 }
 
 .modal-close {
@@ -455,8 +557,7 @@ button.full {
   display: flex;
 }
 
-#camera-video,
-.camera-review-img {
+#camera-video {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -465,17 +566,70 @@ button.full {
   background: #000;
 }
 
-.camera-review-img {
-  display: none;
+.camera-review-img,
+#camera-review-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
+  background: #000;
+  display: none;
 }
 
 .camera-overlay.reviewing #camera-video {
   display: none;
 }
 
-.camera-overlay.reviewing .camera-review-img {
+.camera-overlay.reviewing.review-image .camera-review-img {
   display: block;
+}
+
+.camera-overlay.reviewing.review-video #camera-review-video {
+  display: block;
+}
+
+.camera-mode-toggle {
+  position: absolute;
+  top: calc(1rem + env(safe-area-inset-top, 0));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 0.5rem;
+  z-index: 2;
+}
+
+.camera-overlay.reviewing .camera-mode-toggle,
+.camera-overlay.recording .camera-mode-toggle {
+  display: none;
+}
+
+.camera-rec-indicator {
+  display: none;
+  position: absolute;
+  top: calc(1rem + env(safe-area-inset-top, 0));
+  left: 50%;
+  transform: translateX(-50%);
+  align-items: center;
+  gap: 0.4rem;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  padding: 0.3rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  z-index: 2;
+}
+
+.camera-overlay.recording .camera-rec-indicator {
+  display: flex;
+}
+
+.camera-rec-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--danger);
 }
 
 .camera-error {
@@ -531,6 +685,11 @@ button.full {
 
 .shutter-btn:active {
   background: var(--accent);
+}
+
+.shutter-btn.recording {
+  background: var(--danger);
+  border-radius: 14px;
 }
 
 #camera-use {

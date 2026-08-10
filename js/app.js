@@ -16,15 +16,22 @@ const DISPOSITION_CLASS = {
   Discard: 'badge-discard',
 };
 
+const MAX_RECORDING_MS = 60000;
+
 let assets = [];
 let filters = { disposition: 'all', category: 'all', search: '' };
 let objectUrls = [];
-let capturedPhotoBlob = null;
+let pendingMedia = []; // items queued in the capture form: [{id, type: 'image'|'video', blob}]
+let mediaPreviewUrls = [];
 
 // ---------- helpers ----------
 
 function uuid() {
   return (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Date.now() + '-' + Math.random().toString(16).slice(2));
+}
+
+function mediaTypeFromMime(mime) {
+  return mime && mime.startsWith('video/') ? 'video' : 'image';
 }
 
 function formatCurrency(n) {
@@ -49,6 +56,12 @@ function showToast(message) {
   toast.textContent = message;
   toast.classList.add('show');
   setTimeout(() => toast.classList.remove('show'), 2200);
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
 }
 
 // ---------- view switching ----------
@@ -85,26 +98,56 @@ function updateDispositionFields() {
 dispositionSelect.addEventListener('change', updateDispositionFields);
 updateDispositionFields();
 
-const photoInput = document.getElementById('f-photo');
-const photoPreview = document.getElementById('f-photo-preview');
+// ---------- pending media (queued in the capture form before "Save item") ----------
 
-function setCapturedPhoto(blob) {
-  capturedPhotoBlob = blob;
-  if (!blob) {
-    photoPreview.classList.remove('show');
-    return;
-  }
-  const url = trackObjectUrl(URL.createObjectURL(blob));
-  photoPreview.src = url;
-  photoPreview.classList.add('show');
+const mediaInput = document.getElementById('f-media-input');
+const mediaPreviewList = document.getElementById('media-preview-list');
+
+function addPendingMedia(blob, type) {
+  pendingMedia.push({ id: uuid(), type: type || mediaTypeFromMime(blob.type), blob });
+  renderMediaPreview();
 }
 
-photoInput.addEventListener('change', () => {
-  setCapturedPhoto(photoInput.files[0] || null);
+function removePendingMedia(id) {
+  pendingMedia = pendingMedia.filter((m) => m.id !== id);
+  renderMediaPreview();
+}
+
+function renderMediaPreview() {
+  mediaPreviewUrls.forEach((url) => URL.revokeObjectURL(url));
+  mediaPreviewUrls = [];
+  mediaPreviewList.innerHTML = '';
+
+  pendingMedia.forEach((item) => {
+    const url = URL.createObjectURL(item.blob);
+    mediaPreviewUrls.push(url);
+
+    const wrap = document.createElement('div');
+    wrap.className = 'media-thumb-wrap';
+    wrap.innerHTML = item.type === 'video'
+      ? `<video class="media-thumb" src="${url}" muted playsinline></video><span class="media-thumb-badge">VIDEO</span>`
+      : `<img class="media-thumb" src="${url}" alt="">`;
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'media-thumb-remove';
+    removeBtn.setAttribute('aria-label', 'Remove');
+    removeBtn.textContent = '×';
+    removeBtn.addEventListener('click', () => removePendingMedia(item.id));
+    wrap.appendChild(removeBtn);
+
+    mediaPreviewList.appendChild(wrap);
+  });
+}
+
+mediaInput.addEventListener('change', () => {
+  Array.from(mediaInput.files).forEach((file) => addPendingMedia(file, mediaTypeFromMime(file.type)));
+  mediaInput.value = '';
 });
 
 document.getElementById('btn-choose-file').addEventListener('click', () => {
-  photoInput.click();
+  mediaInput.removeAttribute('capture');
+  mediaInput.click();
 });
 
 document.getElementById('capture-form').addEventListener('submit', (e) => {
@@ -115,7 +158,7 @@ document.getElementById('capture-form').addEventListener('submit', (e) => {
     id: uuid(),
     title: document.getElementById('f-title').value.trim(),
     category: document.getElementById('f-category').value,
-    photo: capturedPhotoBlob || null,
+    media: pendingMedia.map((m) => ({ id: m.id, type: m.type, blob: m.blob })),
     dispositionType: disposition,
     recipientName: disposition === 'Gift' ? document.getElementById('f-recipient').value.trim() : '',
     platform: disposition === 'Sell' ? document.getElementById('f-platform').value.trim() : '',
@@ -139,25 +182,45 @@ document.getElementById('capture-form').addEventListener('submit', (e) => {
 
 function resetCaptureForm() {
   document.getElementById('capture-form').reset();
-  setCapturedPhoto(null);
+  pendingMedia = [];
+  renderMediaPreview();
   updateDispositionFields();
 }
 
 // ---------- live camera capture ----------
 // Opens an in-page viewfinder via getUserMedia (rear camera by default) instead of
 // handing off to the OS file picker. Requires a secure context (https:// or localhost) —
-// browsers refuse camera access on plain http:// or file://.
+// browsers refuse camera access on plain http:// or file://. Supports both a still-photo
+// shutter and a video recorder (MediaRecorder) on the same stream, toggled by a mode chip.
+//
+// cameraTargetAssetId is null when capturing for the not-yet-saved capture form (the result
+// goes into pendingMedia); when set, "Use" attaches the result directly to that existing,
+// already-saved item instead.
 
 const cameraOverlay = document.getElementById('camera-overlay');
 const cameraVideo = document.getElementById('camera-video');
 const cameraCanvas = document.getElementById('camera-canvas');
 const cameraReviewImg = document.getElementById('camera-review-img');
+const cameraReviewVideo = document.getElementById('camera-review-video');
 const cameraErrorEl = document.getElementById('camera-error');
+const cameraLiveControls = document.getElementById('camera-live-controls');
+const cameraReviewControls = document.getElementById('camera-review-controls');
+const cameraShutterBtn = document.getElementById('camera-shutter');
+const cameraModePhotoBtn = document.getElementById('camera-mode-photo');
+const cameraModeVideoBtn = document.getElementById('camera-mode-video');
+const cameraRecTimeEl = document.getElementById('camera-rec-time');
 
 let cameraStream = null;
 let cameraFacingMode = 'environment';
+let cameraMode = 'photo'; // 'photo' | 'video'
+let cameraTargetAssetId = null;
 let pendingCaptureBlob = null;
+let pendingCaptureType = null;
 let pendingCaptureUrl = null;
+let mediaRecorder = null;
+let recordedChunks = [];
+let recordingStartTime = null;
+let recordingTimerInterval = null;
 
 function cameraSupported() {
   return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
@@ -178,7 +241,7 @@ async function startCameraStream() {
   try {
     cameraStream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: { ideal: cameraFacingMode } },
-      audio: false,
+      audio: cameraMode === 'video',
     });
     cameraVideo.srcObject = cameraStream;
   } catch (err) {
@@ -201,29 +264,51 @@ function stopCameraStream() {
   }
 }
 
-function openCamera() {
+function setCameraMode(mode) {
+  if (cameraMode === mode) return;
+  cameraMode = mode;
+  cameraModePhotoBtn.classList.toggle('active', mode === 'photo');
+  cameraModeVideoBtn.classList.toggle('active', mode === 'video');
+  startCameraStream();
+}
+
+function openCamera(targetAssetId) {
+  cameraTargetAssetId = targetAssetId || null;
+
   if (!cameraSupported()) {
     showToast('Live camera isn\'t supported here — using Choose from Gallery instead.');
-    photoInput.setAttribute('capture', 'environment');
-    photoInput.click();
+    mediaInput.setAttribute('capture', 'environment');
+    mediaInput.click();
+    cameraTargetAssetId = null;
     return;
   }
-  cameraOverlay.classList.remove('reviewing');
+
+  cameraMode = 'photo';
+  cameraModePhotoBtn.classList.add('active');
+  cameraModeVideoBtn.classList.remove('active');
+  cameraOverlay.classList.remove('reviewing', 'recording', 'review-image', 'review-video');
   cameraOverlay.classList.add('show');
-  document.getElementById('camera-live-controls').style.display = 'flex';
-  document.getElementById('camera-review-controls').style.display = 'none';
+  cameraLiveControls.style.display = 'flex';
+  cameraReviewControls.style.display = 'none';
   startCameraStream();
 }
 
 function closeCamera() {
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    mediaRecorder.onstop = null;
+    mediaRecorder.stop();
+  }
+  stopRecordingTimer();
   stopCameraStream();
-  cameraOverlay.classList.remove('show', 'reviewing');
+  cameraOverlay.classList.remove('show', 'reviewing', 'recording', 'review-image', 'review-video');
   hideCameraError();
   if (pendingCaptureUrl) {
     URL.revokeObjectURL(pendingCaptureUrl);
     pendingCaptureUrl = null;
   }
   pendingCaptureBlob = null;
+  pendingCaptureType = null;
+  cameraTargetAssetId = null;
 }
 
 function capturePhoto() {
@@ -234,44 +319,159 @@ function capturePhoto() {
   cameraCanvas.toBlob((blob) => {
     if (!blob) return;
     pendingCaptureBlob = blob;
+    pendingCaptureType = 'image';
     pendingCaptureUrl = URL.createObjectURL(blob);
     cameraReviewImg.src = pendingCaptureUrl;
-    cameraOverlay.classList.add('reviewing');
-    document.getElementById('camera-live-controls').style.display = 'none';
-    document.getElementById('camera-review-controls').style.display = 'flex';
+    cameraOverlay.classList.add('reviewing', 'review-image');
+    cameraLiveControls.style.display = 'none';
+    cameraReviewControls.style.display = 'flex';
   }, 'image/jpeg', 0.9);
 }
 
-function retakePhoto() {
-  if (pendingCaptureUrl) {
-    URL.revokeObjectURL(pendingCaptureUrl);
-    pendingCaptureUrl = null;
-  }
-  pendingCaptureBlob = null;
-  cameraOverlay.classList.remove('reviewing');
-  document.getElementById('camera-live-controls').style.display = 'flex';
-  document.getElementById('camera-review-controls').style.display = 'none';
+function pickVideoMimeType() {
+  if (!window.MediaRecorder) return '';
+  const candidates = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+  return candidates.find((t) => MediaRecorder.isTypeSupported(t)) || '';
 }
 
-function usePhoto() {
-  if (pendingCaptureBlob) setCapturedPhoto(pendingCaptureBlob);
+function startRecording() {
+  if (!cameraStream || !window.MediaRecorder) {
+    showCameraError('Video recording isn\'t supported on this browser.');
+    return;
+  }
+  recordedChunks = [];
+  const mimeType = pickVideoMimeType();
+  try {
+    mediaRecorder = mimeType ? new MediaRecorder(cameraStream, { mimeType }) : new MediaRecorder(cameraStream);
+  } catch (err) {
+    showCameraError('Video recording isn\'t supported on this browser.');
+    return;
+  }
+
+  mediaRecorder.ondataavailable = (e) => {
+    if (e.data && e.data.size > 0) recordedChunks.push(e.data);
+  };
+  mediaRecorder.onstop = () => {
+    stopRecordingTimer();
+    cameraOverlay.classList.remove('recording');
+    cameraShutterBtn.classList.remove('recording');
+    if (recordedChunks.length === 0) return;
+    const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || 'video/webm' });
+    pendingCaptureBlob = blob;
+    pendingCaptureType = 'video';
+    pendingCaptureUrl = URL.createObjectURL(blob);
+    cameraReviewVideo.src = pendingCaptureUrl;
+    cameraOverlay.classList.add('reviewing', 'review-video');
+    cameraLiveControls.style.display = 'none';
+    cameraReviewControls.style.display = 'flex';
+  };
+
+  mediaRecorder.start();
+  recordingStartTime = Date.now();
+  cameraOverlay.classList.add('recording');
+  cameraShutterBtn.classList.add('recording');
+  startRecordingTimer();
+}
+
+function stopRecording() {
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    mediaRecorder.stop();
+  }
+}
+
+function startRecordingTimer() {
+  updateRecordingTime();
+  recordingTimerInterval = setInterval(() => {
+    updateRecordingTime();
+    if (Date.now() - recordingStartTime >= MAX_RECORDING_MS) stopRecording();
+  }, 250);
+}
+
+function stopRecordingTimer() {
+  if (recordingTimerInterval) {
+    clearInterval(recordingTimerInterval);
+    recordingTimerInterval = null;
+  }
+}
+
+function updateRecordingTime() {
+  const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
+  const mins = Math.floor(elapsed / 60);
+  const secs = elapsed % 60;
+  cameraRecTimeEl.textContent = mins + ':' + String(secs).padStart(2, '0');
+}
+
+function retakeCapture() {
   if (pendingCaptureUrl) {
     URL.revokeObjectURL(pendingCaptureUrl);
     pendingCaptureUrl = null;
   }
   pendingCaptureBlob = null;
+  pendingCaptureType = null;
+  cameraOverlay.classList.remove('reviewing', 'review-image', 'review-video');
+  cameraLiveControls.style.display = 'flex';
+  cameraReviewControls.style.display = 'none';
+}
+
+function useCapturedMedia() {
+  if (pendingCaptureBlob) {
+    if (cameraTargetAssetId) {
+      attachMediaToAsset(cameraTargetAssetId, [{ blob: pendingCaptureBlob, type: pendingCaptureType }]);
+    } else {
+      addPendingMedia(pendingCaptureBlob, pendingCaptureType);
+    }
+  }
+  if (pendingCaptureUrl) {
+    URL.revokeObjectURL(pendingCaptureUrl);
+    pendingCaptureUrl = null;
+  }
+  pendingCaptureBlob = null;
+  pendingCaptureType = null;
   closeCamera();
 }
 
-document.getElementById('btn-open-camera').addEventListener('click', openCamera);
+document.getElementById('btn-open-camera').addEventListener('click', () => openCamera());
 document.getElementById('camera-cancel').addEventListener('click', closeCamera);
-document.getElementById('camera-shutter').addEventListener('click', capturePhoto);
-document.getElementById('camera-retake').addEventListener('click', retakePhoto);
-document.getElementById('camera-use').addEventListener('click', usePhoto);
+cameraShutterBtn.addEventListener('click', () => {
+  if (cameraMode === 'photo') {
+    capturePhoto();
+  } else if (mediaRecorder && mediaRecorder.state === 'recording') {
+    stopRecording();
+  } else {
+    startRecording();
+  }
+});
+document.getElementById('camera-retake').addEventListener('click', retakeCapture);
+document.getElementById('camera-use').addEventListener('click', useCapturedMedia);
 document.getElementById('camera-switch').addEventListener('click', () => {
   cameraFacingMode = cameraFacingMode === 'environment' ? 'user' : 'environment';
   startCameraStream();
 });
+cameraModePhotoBtn.addEventListener('click', () => setCameraMode('photo'));
+cameraModeVideoBtn.addEventListener('click', () => setCameraMode('video'));
+
+// ---------- attaching media to an already-saved item (from the item detail modal) ----------
+
+function attachMediaToAsset(assetId, items) {
+  const asset = assets.find((a) => a.id === assetId);
+  if (!asset || items.length === 0) return;
+  asset.media = (asset.media || []).concat(items.map((it) => ({ id: uuid(), type: it.type, blob: it.blob })));
+  asset.updatedAt = new Date().toISOString();
+  AssetDB.put(asset).then(() => {
+    showToast('Added to "' + asset.title + '"');
+    loadAssets().then(() => openItemModal(assetId));
+  });
+}
+
+function removeMediaFromAsset(assetId, mediaId) {
+  const asset = assets.find((a) => a.id === assetId);
+  if (!asset) return;
+  asset.media = (asset.media || []).filter((m) => m.id !== mediaId);
+  asset.updatedAt = new Date().toISOString();
+  AssetDB.put(asset).then(() => {
+    loadAssets().then(() => openItemModal(assetId));
+  });
+}
 
 // ---------- dashboard ----------
 
@@ -312,6 +512,17 @@ function filteredAssets() {
   });
 }
 
+function thumbnailHtml(media) {
+  const firstImage = media.find((m) => m.type === 'image');
+  const thumbMedia = firstImage || media[0];
+  if (!thumbMedia) return '<div class="item-thumb placeholder">No photo</div>';
+
+  const url = trackObjectUrl(URL.createObjectURL(thumbMedia.blob));
+  return thumbMedia.type === 'video'
+    ? `<video class="item-thumb" src="${url}" muted playsinline></video>`
+    : `<img class="item-thumb" src="${url}" alt="">`;
+}
+
 function renderDashboard() {
   populateCategoryFilter();
   revokeObjectUrls();
@@ -325,24 +536,19 @@ function renderDashboard() {
 
   list.innerHTML = '';
   items.forEach((asset) => {
+    const media = asset.media || [];
     const card = document.createElement('div');
     card.className = 'item-card';
     card.addEventListener('click', () => openItemModal(asset.id));
 
-    let thumbHtml;
-    if (asset.photo) {
-      const url = trackObjectUrl(URL.createObjectURL(asset.photo));
-      thumbHtml = `<img class="item-thumb" src="${url}" alt="">`;
-    } else {
-      thumbHtml = '<div class="item-thumb placeholder">No photo</div>';
-    }
+    const countBadge = media.length > 1 ? `<span class="media-count-badge">${media.length}</span>` : '';
 
     const metaBits = [asset.category];
     if (asset.dispositionType === 'Gift' && asset.recipientName) metaBits.push('→ ' + asset.recipientName);
     if (asset.dispositionType === 'Sell' && asset.askingPrice) metaBits.push(formatCurrency(asset.askingPrice));
 
     card.innerHTML = `
-      ${thumbHtml}
+      <div class="item-thumb-wrap">${thumbnailHtml(media)}${countBadge}</div>
       <div class="item-info">
         <div class="item-title"></div>
         <div class="item-meta"></div>
@@ -360,15 +566,23 @@ function renderDashboard() {
 const modalOverlay = document.getElementById('item-modal');
 const modalContent = document.getElementById('item-modal-content');
 
+function galleryHtml(media) {
+  if (media.length === 0) {
+    return '<p class="empty-state" style="padding:1.5rem 0;">No photos or videos yet.</p>';
+  }
+  return '<div class="modal-gallery">' + media.map((m) => {
+    const url = trackObjectUrl(URL.createObjectURL(m.blob));
+    const inner = m.type === 'video'
+      ? `<video src="${url}" controls playsinline></video>`
+      : `<img src="${url}" alt="">`;
+    return `<div class="modal-gallery-item">${inner}<button type="button" class="modal-gallery-remove" data-media-id="${m.id}" aria-label="Remove">×</button></div>`;
+  }).join('') + '</div>';
+}
+
 function openItemModal(id) {
   const asset = assets.find((a) => a.id === id);
   if (!asset) return;
-
-  let photoHtml = '';
-  if (asset.photo) {
-    const url = trackObjectUrl(URL.createObjectURL(asset.photo));
-    photoHtml = `<img src="${url}" alt="">`;
-  }
+  const media = asset.media || [];
 
   const extraLines = [];
   if (asset.dispositionType === 'Gift' && asset.recipientName) {
@@ -392,16 +606,32 @@ function openItemModal(id) {
   modalContent.innerHTML = `
     <button class="modal-close" id="modal-close-btn">Close</button>
     <h3>${escapeHtml(asset.title)}</h3>
-    ${photoHtml}
+    ${galleryHtml(media)}
+    <div class="btn-row" style="margin-bottom:1rem;">
+      <button type="button" class="secondary" id="modal-camera-btn">Camera</button>
+      <button type="button" class="secondary" id="modal-gallery-btn">Choose from Gallery</button>
+    </div>
+    <input type="file" id="modal-media-input" accept="image/*,video/*" multiple style="display:none;">
     <span class="badge ${DISPOSITION_CLASS[asset.dispositionType]}">${asset.dispositionType}</span>
     <div class="item-meta" style="margin-top:0.5rem;">${escapeHtml(asset.category)}</div>
     ${extraLines.join('')}
     <div class="btn-row" style="margin-top:1rem;">
-      <button class="danger" id="modal-delete-btn">Delete</button>
+      <button class="danger" id="modal-delete-btn">Delete item</button>
     </div>
   `;
 
   modalContent.querySelector('#modal-close-btn').addEventListener('click', closeItemModal);
+  modalContent.querySelectorAll('.modal-gallery-remove').forEach((btn) => {
+    btn.addEventListener('click', () => removeMediaFromAsset(asset.id, btn.dataset.mediaId));
+  });
+  modalContent.querySelector('#modal-camera-btn').addEventListener('click', () => openCamera(asset.id));
+  const modalMediaInput = modalContent.querySelector('#modal-media-input');
+  modalContent.querySelector('#modal-gallery-btn').addEventListener('click', () => modalMediaInput.click());
+  modalMediaInput.addEventListener('change', () => {
+    const items = Array.from(modalMediaInput.files).map((file) => ({ blob: file, type: mediaTypeFromMime(file.type) }));
+    modalMediaInput.value = '';
+    if (items.length) attachMediaToAsset(asset.id, items);
+  });
   modalContent.querySelector('#modal-delete-btn').addEventListener('click', () => {
     if (confirm(`Delete "${asset.title}"? This can't be undone.`)) {
       AssetDB.delete(asset.id).then(() => {
@@ -423,12 +653,6 @@ function closeItemModal() {
 modalOverlay.addEventListener('click', (e) => {
   if (e.target === modalOverlay) closeItemModal();
 });
-
-function escapeHtml(str) {
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
-}
 
 // ---------- export view ----------
 
@@ -492,6 +716,13 @@ function printItemLine(asset) {
   if (asset.dispositionType === 'Donate' && asset.donateLocation) bits.push('Where: ' + asset.donateLocation);
   if (asset.estimatedValue) bits.push('Value: ' + formatCurrency(asset.estimatedValue));
   if (asset.hasProof) bits.push('Has proof of purchase');
+
+  const media = asset.media || [];
+  const photoCount = media.filter((m) => m.type === 'image').length;
+  const videoCount = media.filter((m) => m.type === 'video').length;
+  if (photoCount) bits.push(photoCount + ' photo' + (photoCount === 1 ? '' : 's'));
+  if (videoCount) bits.push(videoCount + ' video' + (videoCount === 1 ? '' : 's'));
+
   const notes = asset.notes ? ` — ${escapeHtml(asset.notes)}` : '';
   return `<div class="print-item"><strong>${escapeHtml(asset.title)}</strong> (${escapeHtml(bits.join(', '))})${notes}</div>`;
 }
@@ -514,7 +745,11 @@ function dataUrlToBlob(dataUrl) {
 document.getElementById('btn-export-json').addEventListener('click', async () => {
   const exportable = await Promise.all(assets.map(async (a) => {
     const copy = { ...a };
-    copy.photo = a.photo ? await blobToDataUrl(a.photo) : null;
+    copy.media = await Promise.all((a.media || []).map(async (m) => ({
+      id: m.id,
+      type: m.type,
+      blob: await blobToDataUrl(m.blob),
+    })));
     return copy;
   }));
 
@@ -544,7 +779,19 @@ document.getElementById('import-file-input').addEventListener('change', async (e
 
     for (const item of items) {
       const restored = { ...item };
-      restored.photo = item.photo ? await dataUrlToBlob(item.photo) : null;
+      if (Array.isArray(item.media)) {
+        restored.media = await Promise.all(item.media.map(async (m) => ({
+          id: m.id || uuid(),
+          type: m.type,
+          blob: await dataUrlToBlob(m.blob),
+        })));
+      } else if (item.photo) {
+        // legacy single-photo backup format
+        restored.media = [{ id: uuid(), type: 'image', blob: await dataUrlToBlob(item.photo) }];
+      } else {
+        restored.media = [];
+      }
+      delete restored.photo;
       restored.id = restored.id || uuid();
       await AssetDB.put(restored);
     }
@@ -560,14 +807,23 @@ document.getElementById('import-file-input').addEventListener('change', async (e
 
 // ---------- boot ----------
 
-function loadAssets() {
-  return AssetDB.getAll().then((all) => {
-    assets = all;
-    const activeEl = document.querySelector('.view.active');
-    const activeView = activeEl ? activeEl.id.replace('view-', '') : 'capture';
-    if (activeView === 'dashboard') renderDashboard();
-    if (activeView === 'export') renderExportSummary();
-  });
+function migrateAsset(asset) {
+  if (asset.media) return false;
+  asset.media = asset.photo ? [{ id: uuid(), type: 'image', blob: asset.photo }] : [];
+  delete asset.photo;
+  return true;
+}
+
+async function loadAssets() {
+  const all = await AssetDB.getAll();
+  for (const asset of all) {
+    if (migrateAsset(asset)) await AssetDB.put(asset);
+  }
+  assets = all;
+  const activeEl = document.querySelector('.view.active');
+  const activeView = activeEl ? activeEl.id.replace('view-', '') : 'capture';
+  if (activeView === 'dashboard') renderDashboard();
+  if (activeView === 'export') renderExportSummary();
 }
 
 switchView('capture');
