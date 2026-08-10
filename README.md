@@ -57,7 +57,10 @@ Uploads photos/videos to a Google Drive folder you choose and logs each item's T
    - Authorized JavaScript origins: add `http://localhost:8000` (or whatever port you use locally) and your deployed `https://` URL (e.g. `https://<you>.github.io`)
    - Copy the generated **Client ID**.
 5. **APIs & Services → Credentials → Create Credentials → API key**:
-   - Copy the generated key, then click into it and restrict it under **Application restrictions → Websites** to the same origins as step 4 (this key isn't secret, but restricting it stops other sites from using it under your quota).
+   - Copy the generated key, then click into it and restrict it:
+     - **Application restrictions → Websites** — add the same origins as step 4.
+     - **API restrictions → Restrict key** — select only **Google Picker API**. That's the only one of the three this app actually uses the API key for; Drive and Sheets calls authenticate with your OAuth sign-in token instead.
+   - This key isn't a secret, but restricting it stops other sites from using it under your quota.
 
 ### Configure the app
 
