@@ -23,7 +23,7 @@ const SHEET_HEADERS = [
   'Title', 'Category', 'Valuation', 'Currency', 'Disposition Status', 'Recipient',
   'Drive Photo URL 1', 'Drive Photo URL 2', 'Drive Photo URL 3',
   'Receipt URL 1', 'Receipt URL 2', 'Receipt URL 3',
-  'Logged At',
+  'Logged At', 'Notes',
 ];
 const SETTINGS_KEY = 'dostadning-google-sync';
 
@@ -287,6 +287,7 @@ async function appendOrUpdateSheetRow(asset, driveUrls, receiptUrls) {
     ...padUrls(driveUrls),
     ...padUrls(receiptUrls),
     new Date().toISOString(),
+    asset.notes || '',
   ];
 
   if (asset.sheetRow) {
