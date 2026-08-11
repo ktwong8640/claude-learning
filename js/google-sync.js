@@ -13,7 +13,10 @@ const GOOGLE_SCOPES = [
   'https://www.googleapis.com/auth/spreadsheets',
 ].join(' ');
 
-const SHEET_HEADERS = ['Title', 'Category', 'Valuation', 'Disposition Status', 'Recipient', 'Drive Photo URL', 'Logged At'];
+// Receipt URLs is appended at the end (not inserted earlier) so that sheets already
+// connected before this column existed don't get their existing rows' columns shifted —
+// old rows just have that trailing cell blank until re-synced.
+const SHEET_HEADERS = ['Title', 'Category', 'Valuation', 'Disposition Status', 'Recipient', 'Drive Photo URL', 'Logged At', 'Receipt URLs'];
 const SETTINGS_KEY = 'dostadning-google-sync';
 
 let tokenClient = null;
@@ -176,17 +179,24 @@ function extractSheetId(input) {
 }
 
 async function ensureHeaderRow(sheetId, token) {
-  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/A1:G1`, {
+  const lastCol = String.fromCharCode(65 + SHEET_HEADERS.length - 1); // 'H' for 8 headers
+  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/A1:${lastCol}1`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   const data = await res.json();
-  if (!data.values || data.values.length === 0) {
-    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/A1:G1?valueInputOption=RAW`, {
-      method: 'PUT',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ values: [SHEET_HEADERS] }),
-    });
-  }
+  const existing = (data.values && data.values[0]) || [];
+  if (existing.length >= SHEET_HEADERS.length) return; // already has every header we need
+
+  // Only fill in the missing trailing header(s) — never touch cells that already have
+  // content, so an older sheet's already-correct headers (and any custom columns a user
+  // added after them) are left alone.
+  const missing = SHEET_HEADERS.slice(existing.length);
+  const startCol = String.fromCharCode(65 + existing.length);
+  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${startCol}1:${lastCol}1?valueInputOption=RAW`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ values: [missing] }),
+  });
 }
 
 async function connectExistingSheet(idOrUrl) {
@@ -223,10 +233,15 @@ async function createNewSheet(title) {
   return { id: data.spreadsheetId, name: data.properties.title, url: data.spreadsheetUrl };
 }
 
-async function appendOrUpdateSheetRow(asset, driveUrl) {
+async function appendOrUpdateSheetRow(asset, driveUrl, receiptUrls) {
   const settings = loadSyncSettings();
   if (!settings.sheetId) return null;
   const token = await getValidToken();
+  // Cheap idempotent check — upgrades an already-connected sheet's header the first time
+  // it's synced after a new trailing column is added, without requiring the user to
+  // manually reconnect it.
+  await ensureHeaderRow(settings.sheetId, token);
+
   const row = [
     asset.title || '',
     asset.category || '',
@@ -235,10 +250,11 @@ async function appendOrUpdateSheetRow(asset, driveUrl) {
     asset.recipientName || '',
     driveUrl || '',
     new Date().toISOString(),
+    (receiptUrls || []).join(', '),
   ];
 
   if (asset.sheetRow) {
-    const range = `A${asset.sheetRow}:G${asset.sheetRow}`;
+    const range = `A${asset.sheetRow}:H${asset.sheetRow}`;
     const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${settings.sheetId}/values/${range}?valueInputOption=RAW`, {
       method: 'PUT',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -285,7 +301,27 @@ function safeFilename(title) {
   return (title || 'item').replace(/[\\/:*?"<>|]/g, '_').slice(0, 80);
 }
 
-// ---------- top-level: sync one asset's media + log a row ----------
+// ---------- top-level: sync one asset's media + receipts + log a row ----------
+
+async function uploadMediaList(mediaList, asset, folderId, filenameInfix, onProgress, uploadState) {
+  const urls = [];
+  for (let i = 0; i < mediaList.length; i++) {
+    const item = mediaList[i];
+    if (item.driveUrl) {
+      urls.push(item.driveUrl);
+      continue;
+    }
+    uploadState.done++;
+    if (onProgress) onProgress(uploadState.done, uploadState.total);
+    const ext = item.type === 'video' ? '.webm' : '.jpg';
+    const filename = safeFilename(asset.title) + filenameInfix + (i + 1) + ext;
+    const result = await uploadFileToDrive(item.blob, filename, folderId);
+    item.driveFileId = result.id;
+    item.driveUrl = result.webViewLink;
+    urls.push(item.driveUrl);
+  }
+  return urls;
+}
 
 async function syncAsset(asset, onProgress) {
   requireConfigured();
@@ -293,24 +329,16 @@ async function syncAsset(asset, onProgress) {
   if (!settings.folderId) throw new Error('Choose a Google Drive folder first.');
 
   const media = asset.media || [];
-  let primaryUrl = null;
+  const receiptMedia = asset.receiptMedia || [];
+  const uploadState = {
+    done: 0,
+    total: media.filter((m) => !m.driveUrl).length + receiptMedia.filter((m) => !m.driveUrl).length,
+  };
 
-  for (let i = 0; i < media.length; i++) {
-    const item = media[i];
-    if (item.driveUrl) {
-      if (!primaryUrl) primaryUrl = item.driveUrl;
-      continue;
-    }
-    if (onProgress) onProgress(i + 1, media.length);
-    const ext = item.type === 'video' ? '.webm' : '.jpg';
-    const filename = safeFilename(asset.title) + '-' + (i + 1) + ext;
-    const result = await uploadFileToDrive(item.blob, filename, settings.folderId);
-    item.driveFileId = result.id;
-    item.driveUrl = result.webViewLink;
-    if (!primaryUrl) primaryUrl = item.driveUrl;
-  }
+  const mediaUrls = await uploadMediaList(media, asset, settings.folderId, '-', onProgress, uploadState);
+  const receiptUrls = await uploadMediaList(receiptMedia, asset, settings.folderId, '-receipt-', onProgress, uploadState);
 
-  const rowNumber = await appendOrUpdateSheetRow(asset, primaryUrl);
+  const rowNumber = await appendOrUpdateSheetRow(asset, mediaUrls[0] || null, receiptUrls);
   if (rowNumber) asset.sheetRow = rowNumber;
   asset.driveSyncedAt = new Date().toISOString();
   return asset;

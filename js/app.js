@@ -856,7 +856,8 @@ function printItemLine(asset) {
 function isAssetSynced(asset) {
   if (!asset.driveSyncedAt) return false;
   const media = asset.media || [];
-  return media.every((m) => !!m.driveUrl);
+  const receiptMedia = asset.receiptMedia || [];
+  return media.every((m) => !!m.driveUrl) && receiptMedia.every((m) => !!m.driveUrl);
 }
 
 function renderGoogleSyncCard() {

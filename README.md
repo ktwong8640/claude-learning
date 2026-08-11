@@ -80,10 +80,10 @@ Open the **Export** tab → **Google Drive sync** card:
 
 1. **Connect Google Account** — triggers the real Google sign-in popup.
 2. **Choose Drive folder** — opens Google's own folder picker; pick (or create) the folder uploads should go to.
-3. **Connect sheet** (paste an existing Sheet's URL/ID) or **Create new sheet** — either way, a header row (`Title, Category, Valuation, Disposition Status, Recipient, Drive Photo URL, Logged At`) is added automatically if missing.
+3. **Connect sheet** (paste an existing Sheet's URL/ID) or **Create new sheet** — either way, a header row (`Title, Category, Valuation, Disposition Status, Recipient, Drive Photo URL, Logged At, Receipt URLs`) is added automatically if missing. If you connected a sheet before "Receipt URLs" existed, the next sync automatically adds just that trailing column — your existing rows and header text aren't touched.
 4. **Sync all items**, or open any single item and use its **Sync to Google Drive** button. Already-uploaded media isn't re-uploaded; re-syncing an item updates its existing sheet row instead of adding a duplicate.
 
-"Drive Photo URL" logs the first photo/video's Drive link — items with several photos still get every one uploaded, just the sheet row only carries the first as a quick preview link. "Valuation" includes the currency code (e.g. `250 EUR`), since estimated value isn't assumed to be USD. Receipt/proof-of-purchase images aren't part of this sync yet — only the item's own photos/videos are uploaded to Drive.
+"Drive Photo URL" logs the first photo/video's Drive link — items with several photos still get every one uploaded, just the sheet row only carries the first as a quick preview link. "Valuation" includes the currency code (e.g. `250 EUR`), since estimated value isn't assumed to be USD. Receipt/proof-of-purchase images upload too, each named `<item>-receipt-<n>` to keep them distinct from the item's own photos/videos in the Drive folder, with all their links comma-separated in the "Receipt URLs" column.
 
 ## Data model
 
