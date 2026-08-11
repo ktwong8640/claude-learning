@@ -247,6 +247,19 @@ button:hover {
   background: var(--accent-hover);
 }
 
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+button:disabled:hover {
+  background: var(--accent);
+}
+
+button.secondary:disabled:hover {
+  background: transparent;
+}
+
 button:active {
   transform: scale(0.97);
 }

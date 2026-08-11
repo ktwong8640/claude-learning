@@ -19,6 +19,10 @@ const DISPOSITION_CLASS = {
 const MAX_RECORDING_MS = 60000;
 const LAST_CURRENCY_KEY = 'dostadning-last-currency';
 const DEFAULT_CURRENCY = 'USD';
+// Matches google-sync.js's MAX_LINKED_MEDIA — capping capture at the source means the
+// Google Sheet's 3 columns per field are never short of what's actually on the item.
+const MAX_MEDIA_PER_FIELD = 3;
+const MEDIA_LABEL = { media: 'photos/videos', receiptMedia: 'receipt images' };
 
 let assets = [];
 let filters = { disposition: 'all', category: 'all', search: '' };
@@ -134,7 +138,7 @@ updateDispositionFields();
 // Two independent queues share the same logic: item photos/videos, and receipt/proof-of-
 // purchase images. Each gets its own thumbnail strip with a remove (×) button per item.
 
-function createPendingMediaController(listEl) {
+function createPendingMediaController(listEl, onChange) {
   let items = [];
   let urls = [];
 
@@ -166,27 +170,58 @@ function createPendingMediaController(listEl) {
 
       listEl.appendChild(wrap);
     });
+
+    if (onChange) onChange();
   }
 
   return {
+    // Returns false (and adds nothing) once MAX_MEDIA_PER_FIELD is reached — callers
+    // decide how to report that back to the user (single capture vs. bulk file picker
+    // need different messages).
     add(blob, type) {
+      if (items.length >= MAX_MEDIA_PER_FIELD) return false;
       items.push({ id: uuid(), type: type || mediaTypeFromMime(blob.type), blob });
       render();
+      return true;
     },
     clear() {
       items = [];
       render();
     },
     get items() { return items; },
+    get count() { return items.length; },
   };
 }
 
-const mediaController = createPendingMediaController(document.getElementById('media-preview-list'));
-const receiptMediaController = createPendingMediaController(document.getElementById('receipt-media-preview-list'));
+function refreshCaptureMediaButtons() {
+  const mediaFull = mediaController.count >= MAX_MEDIA_PER_FIELD;
+  const receiptFull = receiptMediaController.count >= MAX_MEDIA_PER_FIELD;
+  document.getElementById('btn-open-camera').disabled = mediaFull;
+  document.getElementById('btn-choose-file').disabled = mediaFull;
+  document.getElementById('btn-open-receipt-camera').disabled = receiptFull;
+  document.getElementById('btn-choose-receipt-file').disabled = receiptFull;
+  document.getElementById('media-count-label').textContent = `${mediaController.count} of ${MAX_MEDIA_PER_FIELD} used`;
+  document.getElementById('receipt-count-label').textContent = `${receiptMediaController.count} of ${MAX_MEDIA_PER_FIELD} used`;
+}
+
+const mediaController = createPendingMediaController(document.getElementById('media-preview-list'), refreshCaptureMediaButtons);
+const receiptMediaController = createPendingMediaController(document.getElementById('receipt-media-preview-list'), refreshCaptureMediaButtons);
+refreshCaptureMediaButtons();
+
+function addFilesWithLimit(controller, files, fieldLabel) {
+  let added = 0;
+  for (const file of files) {
+    if (!controller.add(file, mediaTypeFromMime(file.type))) break;
+    added++;
+  }
+  if (added < files.length) {
+    showToast(`Added ${added} of ${files.length} — up to ${MAX_MEDIA_PER_FIELD} ${fieldLabel} per item.`);
+  }
+}
 
 const mediaInput = document.getElementById('f-media-input');
 mediaInput.addEventListener('change', () => {
-  Array.from(mediaInput.files).forEach((file) => mediaController.add(file, mediaTypeFromMime(file.type)));
+  addFilesWithLimit(mediaController, Array.from(mediaInput.files), MEDIA_LABEL.media);
   mediaInput.value = '';
 });
 document.getElementById('btn-choose-file').addEventListener('click', () => {
@@ -196,7 +231,7 @@ document.getElementById('btn-choose-file').addEventListener('click', () => {
 
 const receiptInput = document.getElementById('f-receipt-input');
 receiptInput.addEventListener('change', () => {
-  Array.from(receiptInput.files).forEach((file) => receiptMediaController.add(file, 'image'));
+  addFilesWithLimit(receiptMediaController, Array.from(receiptInput.files), MEDIA_LABEL.receiptMedia);
   receiptInput.value = '';
 });
 document.getElementById('btn-choose-receipt-file').addEventListener('click', () => {
@@ -484,10 +519,11 @@ function useCapturedMedia() {
   if (pendingCaptureBlob) {
     if (cameraTargetAssetId) {
       attachMediaToAsset(cameraTargetAssetId, [{ blob: pendingCaptureBlob, type: pendingCaptureType }], cameraTargetField);
-    } else if (cameraTargetField === 'receiptMedia') {
-      receiptMediaController.add(pendingCaptureBlob, pendingCaptureType);
     } else {
-      mediaController.add(pendingCaptureBlob, pendingCaptureType);
+      const controller = cameraTargetField === 'receiptMedia' ? receiptMediaController : mediaController;
+      if (!controller.add(pendingCaptureBlob, pendingCaptureType)) {
+        showToast(`Up to ${MAX_MEDIA_PER_FIELD} ${MEDIA_LABEL[cameraTargetField]} per item — remove one first.`);
+      }
     }
   }
   if (pendingCaptureUrl) {
@@ -501,6 +537,8 @@ function useCapturedMedia() {
 
 document.getElementById('btn-open-camera').addEventListener('click', () => openCamera(null, 'media'));
 document.getElementById('btn-open-receipt-camera').addEventListener('click', () => openCamera(null, 'receiptMedia'));
+// (Both buttons above are also disabled via refreshCaptureMediaButtons once at the cap,
+// so this click handler only runs when there's room — no separate guard needed here.)
 document.getElementById('camera-cancel').addEventListener('click', closeCamera);
 cameraShutterBtn.addEventListener('click', () => {
   if (cameraMode === 'photo') {
@@ -526,10 +564,23 @@ function attachMediaToAsset(assetId, items, field) {
   field = field || 'media';
   const asset = assets.find((a) => a.id === assetId);
   if (!asset || items.length === 0) return;
-  asset[field] = (asset[field] || []).concat(items.map((it) => ({ id: uuid(), type: it.type, blob: it.blob })));
+
+  const current = asset[field] || [];
+  const room = Math.max(0, MAX_MEDIA_PER_FIELD - current.length);
+  const toAdd = items.slice(0, room);
+  const skipped = items.length - toAdd.length;
+
+  if (toAdd.length === 0) {
+    showToast(`Up to ${MAX_MEDIA_PER_FIELD} ${MEDIA_LABEL[field]} per item — remove one first.`);
+    return;
+  }
+
+  asset[field] = current.concat(toAdd.map((it) => ({ id: uuid(), type: it.type, blob: it.blob })));
   asset.updatedAt = new Date().toISOString();
   AssetDB.put(asset).then(() => {
-    showToast('Added to "' + asset.title + '"');
+    showToast(skipped > 0
+      ? `Added ${toAdd.length} to "${asset.title}" (${skipped} skipped — max ${MAX_MEDIA_PER_FIELD}).`
+      : 'Added to "' + asset.title + '"');
     loadAssets().then(() => openItemModal(assetId));
   });
 }
@@ -684,14 +735,19 @@ function openItemModal(id) {
        ${synced ? '<p class="item-meta" style="margin-top:-0.25rem;margin-bottom:1rem;">Synced to Google Drive/Sheet.</p>' : '<div style="margin-bottom:1rem;"></div>'}`
     : '';
 
+  const mediaFull = media.length >= MAX_MEDIA_PER_FIELD;
+  const receiptFull = receiptMedia.length >= MAX_MEDIA_PER_FIELD;
+  const limitTitle = `Maximum ${MAX_MEDIA_PER_FIELD} per item`;
+
   modalContent.innerHTML = `
     <button class="modal-close" id="modal-close-btn">Close</button>
     <h3>${escapeHtml(asset.title)}</h3>
     ${galleryHtml(media, 'media')}
-    <div class="btn-row" style="margin-bottom:1rem;">
-      <button type="button" class="secondary" id="modal-camera-btn">Camera</button>
-      <button type="button" class="secondary" id="modal-gallery-btn">Choose from Gallery</button>
+    <div class="btn-row" style="margin-bottom:0.25rem;">
+      <button type="button" class="secondary" id="modal-camera-btn" ${mediaFull ? `disabled title="${limitTitle}"` : ''}>Camera</button>
+      <button type="button" class="secondary" id="modal-gallery-btn" ${mediaFull ? `disabled title="${limitTitle}"` : ''}>Choose from Gallery</button>
     </div>
+    <p class="item-meta" style="margin-bottom:1rem;">${media.length} of ${MAX_MEDIA_PER_FIELD} used</p>
     <input type="file" id="modal-media-input" accept="image/*,video/*" multiple style="display:none;">
     ${googleSyncHtml}
     <span class="badge ${DISPOSITION_CLASS[asset.dispositionType]}">${asset.dispositionType}</span>
@@ -700,10 +756,11 @@ function openItemModal(id) {
 
     <h3 style="margin-top:1.25rem;">Receipt / proof of purchase</h3>
     ${galleryHtml(receiptMedia, 'receiptMedia')}
-    <div class="btn-row">
-      <button type="button" class="secondary" id="modal-receipt-camera-btn">Camera</button>
-      <button type="button" class="secondary" id="modal-receipt-gallery-btn">Choose from Gallery</button>
+    <div class="btn-row" style="margin-bottom:0.25rem;">
+      <button type="button" class="secondary" id="modal-receipt-camera-btn" ${receiptFull ? `disabled title="${limitTitle}"` : ''}>Camera</button>
+      <button type="button" class="secondary" id="modal-receipt-gallery-btn" ${receiptFull ? `disabled title="${limitTitle}"` : ''}>Choose from Gallery</button>
     </div>
+    <p class="item-meta">${receiptMedia.length} of ${MAX_MEDIA_PER_FIELD} used</p>
     <input type="file" id="modal-receipt-input" accept="image/*" multiple style="display:none;">
 
     <div class="btn-row" style="margin-top:1rem;">
