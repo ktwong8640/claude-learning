@@ -293,6 +293,24 @@ async function appendOrUpdateSheetRow(asset, driveUrls, receiptUrls) {
   return match ? parseInt(match[1], 10) : null;
 }
 
+// Blanks a row's cells rather than deleting the row outright — deleting would shift every
+// row below it up by one, silently invalidating every *other* synced item's cached
+// sheetRow (they'd start overwriting the wrong row on their next sync). Clearing leaves an
+// empty row behind, which is harmless clutter, in exchange for never corrupting another
+// item's row tracking.
+async function clearSheetRow(rowNumber) {
+  const settings = loadSyncSettings();
+  if (!settings.sheetId) return;
+  const token = await getValidToken();
+  const range = `A${rowNumber}:${sheetLastCol()}${rowNumber}`;
+  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${settings.sheetId}/values/${range}:clear`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  if (!res.ok) throw new Error('Could not clear the sheet row (error ' + res.status + ').');
+}
+
 // ---------- Drive upload ----------
 
 async function uploadFileToDrive(blob, filename, folderId) {
@@ -372,4 +390,5 @@ window.GoogleSync = {
   connectExistingSheet,
   createNewSheet,
   syncAsset,
+  clearSheetRow,
 };

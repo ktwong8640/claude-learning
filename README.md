@@ -83,6 +83,8 @@ Open the **Export** tab → **Google Drive sync** card:
 3. **Connect sheet** (paste an existing Sheet's URL/ID) or **Create new sheet** — either way, the header row is written/corrected automatically: `Title, Category, Valuation, Disposition Status, Recipient, Drive Photo URL 1, Drive Photo URL 2, Drive Photo URL 3, Receipt URL 1, Receipt URL 2, Receipt URL 3, Logged At`. Connecting an older sheet from before this column layout existed self-upgrades its header on the next sync — no need to reconnect it.
 4. **Sync all items**, or open any single item and use its **Sync to Google Drive** button. Already-uploaded media isn't re-uploaded; re-syncing an item updates its existing sheet row instead of adding a duplicate.
 
+**Deleting an item** clears its sheet row too (best-effort — if you're not already connected, or the request fails, the item still deletes locally and you're told the row wasn't cleared, rather than being blocked). The row is blanked, not removed outright, so every *other* synced item's row stays exactly where it was — physically deleting a row would shift everything below it up by one and silently corrupt other items' row tracking.
+
 Each photo and receipt gets its **own column** (up to 3 of each) rather than being comma-joined into one cell — that's deliberate: Google Sheets only shows its hover-preview thumbnail when a cell's entire content is a single recognized Drive link, so cramming several URLs into one cell breaks the preview for all of them. This matches the app's own 3-photo/3-receipt-per-item capture limit (see the Capture section above), so every uploaded photo always gets a column. "Valuation" includes the currency code (e.g. `250 EUR`), since estimated value isn't assumed to be USD.
 
 ## Data model

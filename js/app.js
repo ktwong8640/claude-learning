@@ -813,13 +813,25 @@ function openItemModal(id) {
   }
 
   modalContent.querySelector('#modal-delete-btn').addEventListener('click', () => {
-    if (confirm(`Delete "${asset.title}"? This can't be undone.`)) {
+    const sheetNote = asset.sheetRow ? ' Its Google Sheet row will also be cleared.' : '';
+    if (!confirm(`Delete "${asset.title}"? This can't be undone.${sheetNote}`)) return;
+
+    // Best-effort: only try if this item actually has a row to clear, and we're already
+    // connected (never trigger a surprise Google sign-in popup from a delete action).
+    // Any failure here is reported but never blocks the local delete.
+    const clearSheet = (asset.sheetRow && window.GoogleSync && GoogleSync.isConfigured() && GoogleSync.isConnected())
+      ? GoogleSync.clearSheetRow(asset.sheetRow).then(() => null).catch((err) => err.message)
+      : Promise.resolve(null);
+
+    clearSheet.then((sheetError) => {
       AssetDB.delete(asset.id).then(() => {
         closeItemModal();
-        showToast('Deleted "' + asset.title + '"');
+        showToast(sheetError
+          ? `Deleted "${asset.title}" — but couldn't clear its Google Sheet row (${sheetError})`
+          : 'Deleted "' + asset.title + '"');
         loadAssets();
       });
-    }
+    });
   });
 
   modalOverlay.classList.add('show');
