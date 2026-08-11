@@ -17,12 +17,12 @@ const DISPOSITION_CLASS = {
 };
 
 const MAX_RECORDING_MS = 60000;
+const LAST_CURRENCY_KEY = 'dostadning-last-currency';
+const DEFAULT_CURRENCY = 'USD';
 
 let assets = [];
 let filters = { disposition: 'all', category: 'all', search: '' };
 let objectUrls = [];
-let pendingMedia = []; // items queued in the capture form: [{id, type: 'image'|'video', blob}]
-let mediaPreviewUrls = [];
 
 // ---------- helpers ----------
 
@@ -34,11 +34,15 @@ function mediaTypeFromMime(mime) {
   return mime && mime.startsWith('video/') ? 'video' : 'image';
 }
 
-function formatCurrency(n) {
+function formatCurrency(n, currencyCode) {
   if (n === undefined || n === null || n === '') return '';
   const num = Number(n);
   if (Number.isNaN(num)) return '';
-  return num.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
+  try {
+    return num.toLocaleString(undefined, { style: 'currency', currency: currencyCode || DEFAULT_CURRENCY });
+  } catch {
+    return num.toFixed(2) + ' ' + (currencyCode || DEFAULT_CURRENCY);
+  }
 }
 
 function revokeObjectUrls() {
@@ -63,6 +67,34 @@ function escapeHtml(str) {
   div.textContent = str;
   return div.innerHTML;
 }
+
+// ---------- currency ----------
+
+function getCurrencyList() {
+  if (typeof Intl.supportedValuesOf === 'function') {
+    try {
+      return Intl.supportedValuesOf('currency');
+    } catch {
+      // fall through to the static list below
+    }
+  }
+  return ['USD', 'EUR', 'GBP', 'JPY', 'CNY', 'SGD', 'MYR', 'AUD', 'CAD', 'CHF', 'HKD', 'INR', 'KRW',
+    'THB', 'IDR', 'PHP', 'VND', 'NZD', 'SEK', 'NOK', 'DKK', 'ZAR', 'AED', 'SAR', 'MXN', 'BRL'];
+}
+
+const currencySelect = document.getElementById('f-currency');
+
+function lastUsedCurrency() {
+  return localStorage.getItem(LAST_CURRENCY_KEY) || DEFAULT_CURRENCY;
+}
+
+function populateCurrencySelect() {
+  const list = getCurrencyList();
+  currencySelect.innerHTML = list.map((c) => `<option value="${c}">${c}</option>`).join('');
+  const last = lastUsedCurrency();
+  currencySelect.value = list.includes(last) ? last : DEFAULT_CURRENCY;
+}
+populateCurrencySelect();
 
 // ---------- view switching ----------
 
@@ -98,80 +130,105 @@ function updateDispositionFields() {
 dispositionSelect.addEventListener('change', updateDispositionFields);
 updateDispositionFields();
 
-// ---------- pending media (queued in the capture form before "Save item") ----------
+// ---------- pending media queues (queued in the capture form before "Save item") ----------
+// Two independent queues share the same logic: item photos/videos, and receipt/proof-of-
+// purchase images. Each gets its own thumbnail strip with a remove (×) button per item.
+
+function createPendingMediaController(listEl) {
+  let items = [];
+  let urls = [];
+
+  function render() {
+    urls.forEach((url) => URL.revokeObjectURL(url));
+    urls = [];
+    listEl.innerHTML = '';
+
+    items.forEach((item) => {
+      const url = URL.createObjectURL(item.blob);
+      urls.push(url);
+
+      const wrap = document.createElement('div');
+      wrap.className = 'media-thumb-wrap';
+      wrap.innerHTML = item.type === 'video'
+        ? `<video class="media-thumb" src="${url}" muted playsinline></video><span class="media-thumb-badge">VIDEO</span>`
+        : `<img class="media-thumb" src="${url}" alt="">`;
+
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'media-thumb-remove';
+      removeBtn.setAttribute('aria-label', 'Remove');
+      removeBtn.textContent = '×';
+      removeBtn.addEventListener('click', () => {
+        items = items.filter((i) => i.id !== item.id);
+        render();
+      });
+      wrap.appendChild(removeBtn);
+
+      listEl.appendChild(wrap);
+    });
+  }
+
+  return {
+    add(blob, type) {
+      items.push({ id: uuid(), type: type || mediaTypeFromMime(blob.type), blob });
+      render();
+    },
+    clear() {
+      items = [];
+      render();
+    },
+    get items() { return items; },
+  };
+}
+
+const mediaController = createPendingMediaController(document.getElementById('media-preview-list'));
+const receiptMediaController = createPendingMediaController(document.getElementById('receipt-media-preview-list'));
 
 const mediaInput = document.getElementById('f-media-input');
-const mediaPreviewList = document.getElementById('media-preview-list');
-
-function addPendingMedia(blob, type) {
-  pendingMedia.push({ id: uuid(), type: type || mediaTypeFromMime(blob.type), blob });
-  renderMediaPreview();
-}
-
-function removePendingMedia(id) {
-  pendingMedia = pendingMedia.filter((m) => m.id !== id);
-  renderMediaPreview();
-}
-
-function renderMediaPreview() {
-  mediaPreviewUrls.forEach((url) => URL.revokeObjectURL(url));
-  mediaPreviewUrls = [];
-  mediaPreviewList.innerHTML = '';
-
-  pendingMedia.forEach((item) => {
-    const url = URL.createObjectURL(item.blob);
-    mediaPreviewUrls.push(url);
-
-    const wrap = document.createElement('div');
-    wrap.className = 'media-thumb-wrap';
-    wrap.innerHTML = item.type === 'video'
-      ? `<video class="media-thumb" src="${url}" muted playsinline></video><span class="media-thumb-badge">VIDEO</span>`
-      : `<img class="media-thumb" src="${url}" alt="">`;
-
-    const removeBtn = document.createElement('button');
-    removeBtn.type = 'button';
-    removeBtn.className = 'media-thumb-remove';
-    removeBtn.setAttribute('aria-label', 'Remove');
-    removeBtn.textContent = '×';
-    removeBtn.addEventListener('click', () => removePendingMedia(item.id));
-    wrap.appendChild(removeBtn);
-
-    mediaPreviewList.appendChild(wrap);
-  });
-}
-
 mediaInput.addEventListener('change', () => {
-  Array.from(mediaInput.files).forEach((file) => addPendingMedia(file, mediaTypeFromMime(file.type)));
+  Array.from(mediaInput.files).forEach((file) => mediaController.add(file, mediaTypeFromMime(file.type)));
   mediaInput.value = '';
 });
-
 document.getElementById('btn-choose-file').addEventListener('click', () => {
   mediaInput.removeAttribute('capture');
   mediaInput.click();
+});
+
+const receiptInput = document.getElementById('f-receipt-input');
+receiptInput.addEventListener('change', () => {
+  Array.from(receiptInput.files).forEach((file) => receiptMediaController.add(file, 'image'));
+  receiptInput.value = '';
+});
+document.getElementById('btn-choose-receipt-file').addEventListener('click', () => {
+  receiptInput.click();
 });
 
 document.getElementById('capture-form').addEventListener('submit', (e) => {
   e.preventDefault();
 
   const disposition = dispositionSelect.value;
+  const currency = currencySelect.value;
   const asset = {
     id: uuid(),
     title: document.getElementById('f-title').value.trim(),
     category: document.getElementById('f-category').value,
-    media: pendingMedia.map((m) => ({ id: m.id, type: m.type, blob: m.blob })),
+    media: mediaController.items.map((m) => ({ id: m.id, type: m.type, blob: m.blob })),
+    receiptMedia: receiptMediaController.items.map((m) => ({ id: m.id, type: m.type, blob: m.blob })),
     dispositionType: disposition,
     recipientName: disposition === 'Gift' ? document.getElementById('f-recipient').value.trim() : '',
     platform: disposition === 'Sell' ? document.getElementById('f-platform').value.trim() : '',
     askingPrice: disposition === 'Sell' ? document.getElementById('f-asking-price').value : '',
     donateLocation: disposition === 'Donate' ? document.getElementById('f-donate-location').value.trim() : '',
+    currency,
     estimatedValue: document.getElementById('f-value').value,
-    hasProof: document.getElementById('f-has-proof').checked,
     notes: document.getElementById('f-notes').value.trim(),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
 
   if (!asset.title) return;
+
+  localStorage.setItem(LAST_CURRENCY_KEY, currency);
 
   AssetDB.put(asset).then(() => {
     resetCaptureForm();
@@ -182,9 +239,10 @@ document.getElementById('capture-form').addEventListener('submit', (e) => {
 
 function resetCaptureForm() {
   document.getElementById('capture-form').reset();
-  pendingMedia = [];
-  renderMediaPreview();
+  mediaController.clear();
+  receiptMediaController.clear();
   updateDispositionFields();
+  currencySelect.value = lastUsedCurrency();
 }
 
 // ---------- live camera capture ----------
@@ -194,8 +252,10 @@ function resetCaptureForm() {
 // shutter and a video recorder (MediaRecorder) on the same stream, toggled by a mode chip.
 //
 // cameraTargetAssetId is null when capturing for the not-yet-saved capture form (the result
-// goes into pendingMedia); when set, "Use" attaches the result directly to that existing,
-// already-saved item instead.
+// goes into the pending queue for cameraTargetField); when set, "Use" attaches the result
+// directly to that existing, already-saved item's field instead. cameraTargetField selects
+// which media collection this capture belongs to: 'media' (item photos/videos) or
+// 'receiptMedia' (proof of purchase — photo-only, the mode toggle is hidden for this one).
 
 const cameraOverlay = document.getElementById('camera-overlay');
 const cameraVideo = document.getElementById('camera-video');
@@ -206,6 +266,7 @@ const cameraErrorEl = document.getElementById('camera-error');
 const cameraLiveControls = document.getElementById('camera-live-controls');
 const cameraReviewControls = document.getElementById('camera-review-controls');
 const cameraShutterBtn = document.getElementById('camera-shutter');
+const cameraModeToggle = document.getElementById('camera-mode-toggle');
 const cameraModePhotoBtn = document.getElementById('camera-mode-photo');
 const cameraModeVideoBtn = document.getElementById('camera-mode-video');
 const cameraRecTimeEl = document.getElementById('camera-rec-time');
@@ -214,6 +275,7 @@ let cameraStream = null;
 let cameraFacingMode = 'environment';
 let cameraMode = 'photo'; // 'photo' | 'video'
 let cameraTargetAssetId = null;
+let cameraTargetField = 'media'; // 'media' | 'receiptMedia'
 let pendingCaptureBlob = null;
 let pendingCaptureType = null;
 let pendingCaptureUrl = null;
@@ -272,13 +334,16 @@ function setCameraMode(mode) {
   startCameraStream();
 }
 
-function openCamera(targetAssetId) {
+function openCamera(targetAssetId, field) {
   cameraTargetAssetId = targetAssetId || null;
+  cameraTargetField = field || 'media';
+  const photoOnly = cameraTargetField === 'receiptMedia';
+  const fallbackInput = photoOnly ? receiptInput : mediaInput;
 
   if (!cameraSupported()) {
     showToast('Live camera isn\'t supported here — using Choose from Gallery instead.');
-    mediaInput.setAttribute('capture', 'environment');
-    mediaInput.click();
+    fallbackInput.setAttribute('capture', 'environment');
+    fallbackInput.click();
     cameraTargetAssetId = null;
     return;
   }
@@ -286,6 +351,7 @@ function openCamera(targetAssetId) {
   cameraMode = 'photo';
   cameraModePhotoBtn.classList.add('active');
   cameraModeVideoBtn.classList.remove('active');
+  cameraModeToggle.style.display = photoOnly ? 'none' : 'flex';
   cameraOverlay.classList.remove('reviewing', 'recording', 'review-image', 'review-video');
   cameraOverlay.classList.add('show');
   cameraLiveControls.style.display = 'flex';
@@ -309,6 +375,7 @@ function closeCamera() {
   pendingCaptureBlob = null;
   pendingCaptureType = null;
   cameraTargetAssetId = null;
+  cameraTargetField = 'media';
 }
 
 function capturePhoto() {
@@ -416,9 +483,11 @@ function retakeCapture() {
 function useCapturedMedia() {
   if (pendingCaptureBlob) {
     if (cameraTargetAssetId) {
-      attachMediaToAsset(cameraTargetAssetId, [{ blob: pendingCaptureBlob, type: pendingCaptureType }]);
+      attachMediaToAsset(cameraTargetAssetId, [{ blob: pendingCaptureBlob, type: pendingCaptureType }], cameraTargetField);
+    } else if (cameraTargetField === 'receiptMedia') {
+      receiptMediaController.add(pendingCaptureBlob, pendingCaptureType);
     } else {
-      addPendingMedia(pendingCaptureBlob, pendingCaptureType);
+      mediaController.add(pendingCaptureBlob, pendingCaptureType);
     }
   }
   if (pendingCaptureUrl) {
@@ -430,7 +499,8 @@ function useCapturedMedia() {
   closeCamera();
 }
 
-document.getElementById('btn-open-camera').addEventListener('click', () => openCamera());
+document.getElementById('btn-open-camera').addEventListener('click', () => openCamera(null, 'media'));
+document.getElementById('btn-open-receipt-camera').addEventListener('click', () => openCamera(null, 'receiptMedia'));
 document.getElementById('camera-cancel').addEventListener('click', closeCamera);
 cameraShutterBtn.addEventListener('click', () => {
   if (cameraMode === 'photo') {
@@ -450,12 +520,13 @@ document.getElementById('camera-switch').addEventListener('click', () => {
 cameraModePhotoBtn.addEventListener('click', () => setCameraMode('photo'));
 cameraModeVideoBtn.addEventListener('click', () => setCameraMode('video'));
 
-// ---------- attaching media to an already-saved item (from the item detail modal) ----------
+// ---------- attaching/removing media on an already-saved item (from the item detail modal) ----------
 
-function attachMediaToAsset(assetId, items) {
+function attachMediaToAsset(assetId, items, field) {
+  field = field || 'media';
   const asset = assets.find((a) => a.id === assetId);
   if (!asset || items.length === 0) return;
-  asset.media = (asset.media || []).concat(items.map((it) => ({ id: uuid(), type: it.type, blob: it.blob })));
+  asset[field] = (asset[field] || []).concat(items.map((it) => ({ id: uuid(), type: it.type, blob: it.blob })));
   asset.updatedAt = new Date().toISOString();
   AssetDB.put(asset).then(() => {
     showToast('Added to "' + asset.title + '"');
@@ -463,10 +534,11 @@ function attachMediaToAsset(assetId, items) {
   });
 }
 
-function removeMediaFromAsset(assetId, mediaId) {
+function removeMediaFromAsset(assetId, mediaId, field) {
+  field = field || 'media';
   const asset = assets.find((a) => a.id === assetId);
   if (!asset) return;
-  asset.media = (asset.media || []).filter((m) => m.id !== mediaId);
+  asset[field] = (asset[field] || []).filter((m) => m.id !== mediaId);
   asset.updatedAt = new Date().toISOString();
   AssetDB.put(asset).then(() => {
     loadAssets().then(() => openItemModal(assetId));
@@ -545,7 +617,7 @@ function renderDashboard() {
 
     const metaBits = [asset.category];
     if (asset.dispositionType === 'Gift' && asset.recipientName) metaBits.push('→ ' + asset.recipientName);
-    if (asset.dispositionType === 'Sell' && asset.askingPrice) metaBits.push(formatCurrency(asset.askingPrice));
+    if (asset.dispositionType === 'Sell' && asset.askingPrice) metaBits.push(formatCurrency(asset.askingPrice, asset.currency));
 
     card.innerHTML = `
       <div class="item-thumb-wrap">${thumbnailHtml(media)}${countBadge}</div>
@@ -566,16 +638,16 @@ function renderDashboard() {
 const modalOverlay = document.getElementById('item-modal');
 const modalContent = document.getElementById('item-modal-content');
 
-function galleryHtml(media) {
+function galleryHtml(media, field) {
   if (media.length === 0) {
-    return '<p class="empty-state" style="padding:1.5rem 0;">No photos or videos yet.</p>';
+    return '<p class="empty-state" style="padding:1.5rem 0;">Nothing here yet.</p>';
   }
   return '<div class="modal-gallery">' + media.map((m) => {
     const url = trackObjectUrl(URL.createObjectURL(m.blob));
     const inner = m.type === 'video'
       ? `<video src="${url}" controls playsinline></video>`
       : `<img src="${url}" alt="">`;
-    return `<div class="modal-gallery-item">${inner}<button type="button" class="modal-gallery-remove" data-media-id="${m.id}" aria-label="Remove">×</button></div>`;
+    return `<div class="modal-gallery-item">${inner}<button type="button" class="modal-gallery-remove" data-media-id="${m.id}" data-field="${field}" aria-label="Remove">×</button></div>`;
   }).join('') + '</div>';
 }
 
@@ -583,6 +655,7 @@ function openItemModal(id) {
   const asset = assets.find((a) => a.id === id);
   if (!asset) return;
   const media = asset.media || [];
+  const receiptMedia = asset.receiptMedia || [];
 
   const extraLines = [];
   if (asset.dispositionType === 'Gift' && asset.recipientName) {
@@ -590,15 +663,14 @@ function openItemModal(id) {
   }
   if (asset.dispositionType === 'Sell') {
     if (asset.platform) extraLines.push(`<div class="item-meta">Platform: ${escapeHtml(asset.platform)}</div>`);
-    if (asset.askingPrice) extraLines.push(`<div class="item-meta">Asking price: ${formatCurrency(asset.askingPrice)}</div>`);
+    if (asset.askingPrice) extraLines.push(`<div class="item-meta">Asking price: ${formatCurrency(asset.askingPrice, asset.currency)}</div>`);
   }
   if (asset.dispositionType === 'Donate' && asset.donateLocation) {
     extraLines.push(`<div class="item-meta">Where: ${escapeHtml(asset.donateLocation)}</div>`);
   }
   if (asset.estimatedValue) {
-    extraLines.push(`<div class="item-meta">Estimated value: ${formatCurrency(asset.estimatedValue)}</div>`);
+    extraLines.push(`<div class="item-meta">Estimated value: ${formatCurrency(asset.estimatedValue, asset.currency)}</div>`);
   }
-  extraLines.push(`<div class="item-meta">Proof of purchase: ${asset.hasProof ? 'Yes' : 'No'}</div>`);
   if (asset.notes) {
     extraLines.push(`<div class="item-meta" style="margin-top:0.5rem;">${escapeHtml(asset.notes)}</div>`);
   }
@@ -615,7 +687,7 @@ function openItemModal(id) {
   modalContent.innerHTML = `
     <button class="modal-close" id="modal-close-btn">Close</button>
     <h3>${escapeHtml(asset.title)}</h3>
-    ${galleryHtml(media)}
+    ${galleryHtml(media, 'media')}
     <div class="btn-row" style="margin-bottom:1rem;">
       <button type="button" class="secondary" id="modal-camera-btn">Camera</button>
       <button type="button" class="secondary" id="modal-gallery-btn">Choose from Gallery</button>
@@ -625,6 +697,15 @@ function openItemModal(id) {
     <span class="badge ${DISPOSITION_CLASS[asset.dispositionType]}">${asset.dispositionType}</span>
     <div class="item-meta" style="margin-top:0.5rem;">${escapeHtml(asset.category)}</div>
     ${extraLines.join('')}
+
+    <h3 style="margin-top:1.25rem;">Receipt / proof of purchase</h3>
+    ${galleryHtml(receiptMedia, 'receiptMedia')}
+    <div class="btn-row">
+      <button type="button" class="secondary" id="modal-receipt-camera-btn">Camera</button>
+      <button type="button" class="secondary" id="modal-receipt-gallery-btn">Choose from Gallery</button>
+    </div>
+    <input type="file" id="modal-receipt-input" accept="image/*" multiple style="display:none;">
+
     <div class="btn-row" style="margin-top:1rem;">
       <button class="danger" id="modal-delete-btn">Delete item</button>
     </div>
@@ -632,16 +713,27 @@ function openItemModal(id) {
 
   modalContent.querySelector('#modal-close-btn').addEventListener('click', closeItemModal);
   modalContent.querySelectorAll('.modal-gallery-remove').forEach((btn) => {
-    btn.addEventListener('click', () => removeMediaFromAsset(asset.id, btn.dataset.mediaId));
+    btn.addEventListener('click', () => removeMediaFromAsset(asset.id, btn.dataset.mediaId, btn.dataset.field));
   });
-  modalContent.querySelector('#modal-camera-btn').addEventListener('click', () => openCamera(asset.id));
+
+  modalContent.querySelector('#modal-camera-btn').addEventListener('click', () => openCamera(asset.id, 'media'));
   const modalMediaInput = modalContent.querySelector('#modal-media-input');
   modalContent.querySelector('#modal-gallery-btn').addEventListener('click', () => modalMediaInput.click());
   modalMediaInput.addEventListener('change', () => {
     const items = Array.from(modalMediaInput.files).map((file) => ({ blob: file, type: mediaTypeFromMime(file.type) }));
     modalMediaInput.value = '';
-    if (items.length) attachMediaToAsset(asset.id, items);
+    if (items.length) attachMediaToAsset(asset.id, items, 'media');
   });
+
+  modalContent.querySelector('#modal-receipt-camera-btn').addEventListener('click', () => openCamera(asset.id, 'receiptMedia'));
+  const modalReceiptInput = modalContent.querySelector('#modal-receipt-input');
+  modalContent.querySelector('#modal-receipt-gallery-btn').addEventListener('click', () => modalReceiptInput.click());
+  modalReceiptInput.addEventListener('change', () => {
+    const items = Array.from(modalReceiptInput.files).map((file) => ({ blob: file, type: 'image' }));
+    modalReceiptInput.value = '';
+    if (items.length) attachMediaToAsset(asset.id, items, 'receiptMedia');
+  });
+
   const syncBtn = modalContent.querySelector('#modal-google-sync-btn');
   if (syncBtn) {
     syncBtn.addEventListener('click', async () => {
@@ -660,6 +752,7 @@ function openItemModal(id) {
       }
     });
   }
+
   modalContent.querySelector('#modal-delete-btn').addEventListener('click', () => {
     if (confirm(`Delete "${asset.title}"? This can't be undone.`)) {
       AssetDB.delete(asset.id).then(() => {
@@ -740,11 +833,13 @@ function printItemLine(asset) {
   const bits = [asset.category];
   if (asset.dispositionType === 'Sell') {
     if (asset.platform) bits.push('Platform: ' + asset.platform);
-    if (asset.askingPrice) bits.push('Asking: ' + formatCurrency(asset.askingPrice));
+    if (asset.askingPrice) bits.push('Asking: ' + formatCurrency(asset.askingPrice, asset.currency));
   }
   if (asset.dispositionType === 'Donate' && asset.donateLocation) bits.push('Where: ' + asset.donateLocation);
-  if (asset.estimatedValue) bits.push('Value: ' + formatCurrency(asset.estimatedValue));
-  if (asset.hasProof) bits.push('Has proof of purchase');
+  if (asset.estimatedValue) bits.push('Value: ' + formatCurrency(asset.estimatedValue, asset.currency));
+
+  const receiptCount = (asset.receiptMedia || []).length;
+  if (receiptCount) bits.push(receiptCount + ' receipt image' + (receiptCount === 1 ? '' : 's'));
 
   const media = asset.media || [];
   const photoCount = media.filter((m) => m.type === 'image').length;
@@ -886,6 +981,11 @@ document.getElementById('btn-export-json').addEventListener('click', async () =>
       type: m.type,
       blob: await blobToDataUrl(m.blob),
     })));
+    copy.receiptMedia = await Promise.all((a.receiptMedia || []).map(async (m) => ({
+      id: m.id,
+      type: m.type,
+      blob: await blobToDataUrl(m.blob),
+    })));
     return copy;
   }));
 
@@ -927,7 +1027,15 @@ document.getElementById('import-file-input').addEventListener('change', async (e
       } else {
         restored.media = [];
       }
+      restored.receiptMedia = Array.isArray(item.receiptMedia)
+        ? await Promise.all(item.receiptMedia.map(async (m) => ({
+            id: m.id || uuid(),
+            type: m.type,
+            blob: await dataUrlToBlob(m.blob),
+          })))
+        : [];
       delete restored.photo;
+      delete restored.hasProof;
       restored.id = restored.id || uuid();
       await AssetDB.put(restored);
     }
@@ -944,10 +1052,21 @@ document.getElementById('import-file-input').addEventListener('change', async (e
 // ---------- boot ----------
 
 function migrateAsset(asset) {
-  if (asset.media) return false;
-  asset.media = asset.photo ? [{ id: uuid(), type: 'image', blob: asset.photo }] : [];
-  delete asset.photo;
-  return true;
+  let changed = false;
+  if (!asset.media) {
+    asset.media = asset.photo ? [{ id: uuid(), type: 'image', blob: asset.photo }] : [];
+    delete asset.photo;
+    changed = true;
+  }
+  if (!asset.receiptMedia) {
+    asset.receiptMedia = [];
+    changed = true;
+  }
+  if ('hasProof' in asset) {
+    delete asset.hasProof;
+    changed = true;
+  }
+  return changed;
 }
 
 async function loadAssets() {

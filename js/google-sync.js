@@ -230,7 +230,7 @@ async function appendOrUpdateSheetRow(asset, driveUrl) {
   const row = [
     asset.title || '',
     asset.category || '',
-    asset.estimatedValue || '',
+    asset.estimatedValue ? asset.estimatedValue + ' ' + (asset.currency || 'USD') : '',
     asset.dispositionType || '',
     asset.recipientName || '',
     driveUrl || '',

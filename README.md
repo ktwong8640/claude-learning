@@ -40,7 +40,9 @@ Once served over HTTPS and opened in Chrome (or Samsung Internet) on Android, us
   - **Choose from Gallery** — the OS file/photo picker, with multi-select for photos and videos together. Always works, even over plain `http://` or `file://`.
   
   Queued media show as a thumbnail strip with a remove (×) button on each before you save.
-- **Items** — browse everything you've catalogued, filter by disposition or category, search by title, and tap an item to open it. The detail view is a small gallery of every attached photo/video (videos play inline), and you can add more (Camera or Gallery) or remove individual items at any time — changes save immediately. If Google sync is set up, there's also a **Sync to Google Drive** button here for that one item.
+
+  Estimated value has its own **currency selector** (every ISO currency your browser supports, defaulting to whatever you picked last time) instead of assuming USD. Receipts/warranty cards get their own separate **Receipt / proof of purchase** section — same Camera/Gallery pattern as item photos, but photo-only (no video mode) and kept apart from the item's own gallery, since a receipt isn't a photo of the item itself.
+- **Items** — browse everything you've catalogued, filter by disposition or category, search by title, and tap an item to open it. The detail view has two separate galleries — item photos/videos, and receipt images — each independently addable (Camera or Gallery) and removable at any time; changes save immediately. If Google sync is set up, there's also a **Sync to Google Drive** button here for that one item.
 - **Export** — see counts per disposition, print (or save as PDF) a structured inventory grouped by disposition and, for gifts, by recipient, noting each item's photo/video counts — a guide for whoever handles your estate. Also download/restore a JSON backup, since everything lives only in this browser. The **Google Drive sync** card here lets you connect your Google account, choose a Drive folder, connect or create a Google Sheet, and sync every item in one go.
 
 ## Google Drive & Sheets sync
@@ -81,11 +83,11 @@ Open the **Export** tab → **Google Drive sync** card:
 3. **Connect sheet** (paste an existing Sheet's URL/ID) or **Create new sheet** — either way, a header row (`Title, Category, Valuation, Disposition Status, Recipient, Drive Photo URL, Logged At`) is added automatically if missing.
 4. **Sync all items**, or open any single item and use its **Sync to Google Drive** button. Already-uploaded media isn't re-uploaded; re-syncing an item updates its existing sheet row instead of adding a duplicate.
 
-"Drive Photo URL" logs the first photo/video's Drive link — items with several photos still get every one uploaded, just the sheet row only carries the first as a quick preview link.
+"Drive Photo URL" logs the first photo/video's Drive link — items with several photos still get every one uploaded, just the sheet row only carries the first as a quick preview link. "Valuation" includes the currency code (e.g. `250 EUR`), since estimated value isn't assumed to be USD. Receipt/proof-of-purchase images aren't part of this sync yet — only the item's own photos/videos are uploaded to Drive.
 
 ## Data model
 
-Each catalogued item (`Asset`) has: `id`, `title`, `media` (array of `{ id, type: 'image'|'video', blob, driveFileId?, driveUrl? }`), `category`, `dispositionType`, `recipientName` (Gift), `platform` / `askingPrice` (Sell), `donateLocation` (Donate), `estimatedValue`, `hasProof`, `notes`, `createdAt`, `updatedAt`, and (once synced) `sheetRow` / `driveSyncedAt`. Older items saved before multi-media support (single `photo` field) are migrated into `media` automatically the first time they're loaded.
+Each catalogued item (`Asset`) has: `id`, `title`, `media` (array of `{ id, type: 'image'|'video', blob, driveFileId?, driveUrl? }`), `receiptMedia` (same shape, images only), `category`, `dispositionType`, `recipientName` (Gift), `platform` / `askingPrice` (Sell), `donateLocation` (Donate), `currency` (ISO code, e.g. `USD`), `estimatedValue`, `notes`, `createdAt`, `updatedAt`, and (once synced) `sheetRow` / `driveSyncedAt`. Older items saved before multi-media support (single `photo` field) are migrated into `media` automatically the first time they're loaded; the old boolean `hasProof` field is dropped in favor of `receiptMedia`'s length.
 
 ## Limitations / next steps
 

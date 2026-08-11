@@ -150,6 +150,20 @@ input[type="file"] {
   margin-top: 0.9rem;
 }
 
+.value-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.value-row select {
+  flex: 0 0 auto;
+  width: 5.5rem;
+}
+
+.value-row input {
+  flex: 1;
+}
+
 .checkbox-row input {
   width: auto;
 }
