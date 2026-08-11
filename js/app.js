@@ -1059,6 +1059,32 @@ async function syncPendingAssets(onProgress) {
   return { done, total: pending.length, error };
 }
 
+// Shared by both backup actions (local download and Upload to Drive) — the backup file
+// itself is always complete regardless of Drive sync state, so this is purely a "keep
+// Drive/Sheets from silently falling behind" nudge, never a hard requirement. Returns
+// { proceed, syncedFirst, error }: proceed is false only when the user opted to sync and
+// that sync failed partway — callers should skip their backup action in that case rather
+// than produce one next to an incomplete sync.
+async function checkPendingSyncBeforeBackup(onProgress) {
+  if (!window.GoogleSync || !GoogleSync.isConfigured() || !GoogleSync.isConnected()) {
+    return { proceed: true, syncedFirst: false };
+  }
+  const pending = assets.filter((a) => !isAssetSynced(a));
+  if (pending.length === 0) return { proceed: true, syncedFirst: false };
+
+  const noun = pending.length === 1 ? 'item hasn\'t' : 'items haven\'t';
+  const wantsSync = confirm(
+    `${pending.length} ${noun} been synced to Google Drive/Sheets yet.\n\n` +
+    `Sync ${pending.length === 1 ? 'it' : 'them'} now before backing up? ` +
+    `(The backup itself always includes every item either way — this just keeps Drive/Sheets in sync too.)`
+  );
+  if (!wantsSync) return { proceed: true, syncedFirst: false };
+
+  const result = await syncPendingAssets(onProgress);
+  if (result.error) return { proceed: false, syncedFirst: false, error: result.error };
+  return { proceed: true, syncedFirst: true };
+}
+
 function renderGoogleSyncCard() {
   const container = document.getElementById('google-sync-body');
   if (!container) return;
@@ -1149,30 +1175,17 @@ function renderGoogleSyncCard() {
 
   container.querySelector('#google-upload-backup-btn').addEventListener('click', async () => {
     const originalText = container.querySelector('#google-upload-backup-btn').textContent;
-    const pending = assets.filter((a) => !isAssetSynced(a));
-    let syncedFirst = false;
 
-    if (pending.length > 0) {
-      const noun = pending.length === 1 ? 'item hasn\'t' : 'items haven\'t';
-      const wantsSync = confirm(
-        `${pending.length} ${noun} been synced to Google Drive/Sheets yet.\n\n` +
-        `Sync ${pending.length === 1 ? 'it' : 'them'} now before uploading the backup? ` +
-        `(The backup itself always includes every item either way — this just keeps Drive/Sheets in sync too.)`
-      );
-      if (wantsSync) {
-        const syncBtn = container.querySelector('#google-upload-backup-btn');
-        syncBtn.disabled = true;
-        const result = await syncPendingAssets((asset, i, total) => {
-          syncBtn.textContent = `Syncing "${asset.title}"… (${i + 1}/${total})`;
-        });
-        // syncPendingAssets() called loadAssets(), which re-rendered this whole card —
-        // the button reference above is now detached; re-fetch before continuing.
-        if (result.error) {
-          showToast(result.error + ' — backup not uploaded.');
-          return;
-        }
-        syncedFirst = true;
-      }
+    // Re-queries the button fresh on every call rather than closing over one reference,
+    // since checkPendingSyncBeforeBackup() may run syncPendingAssets() internally, which
+    // calls loadAssets() and re-renders this whole card partway through.
+    const check = await checkPendingSyncBeforeBackup((asset, i, total) => {
+      const liveBtn = container.querySelector('#google-upload-backup-btn');
+      if (liveBtn) liveBtn.textContent = `Syncing "${asset.title}"… (${i + 1}/${total})`;
+    });
+    if (!check.proceed) {
+      showToast(check.error + ' — backup not uploaded.');
+      return;
     }
 
     const btn = container.querySelector('#google-upload-backup-btn');
@@ -1182,7 +1195,7 @@ function renderGoogleSyncCard() {
       const { blob, filename } = await buildBackupBlob();
       btn.textContent = 'Uploading…';
       await GoogleSync.uploadBackup(blob, filename);
-      showToast(syncedFirst ? 'Synced pending items and uploaded backup to Drive' : 'Backup uploaded to Drive');
+      showToast(check.syncedFirst ? 'Synced pending items and uploaded backup to Drive' : 'Backup uploaded to Drive');
     } catch (err) {
       showToast(err.message);
     } finally {
@@ -1231,14 +1244,31 @@ async function buildBackupBlob() {
 }
 
 document.getElementById('btn-export-json').addEventListener('click', async () => {
-  const { blob, filename } = await buildBackupBlob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-  showToast('Backup downloaded');
+  const btn = document.getElementById('btn-export-json');
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  try {
+    const check = await checkPendingSyncBeforeBackup((asset, i, total) => {
+      btn.textContent = `Syncing "${asset.title}"… (${i + 1}/${total})`;
+    });
+    if (!check.proceed) {
+      showToast(check.error + ' — backup not downloaded.');
+      return;
+    }
+
+    btn.textContent = 'Preparing backup…';
+    const { blob, filename } = await buildBackupBlob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast(check.syncedFirst ? 'Synced pending items and downloaded backup' : 'Backup downloaded');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
 });
 
 document.getElementById('btn-import-json').addEventListener('click', () => {
