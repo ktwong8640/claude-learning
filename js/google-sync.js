@@ -190,6 +190,23 @@ function sheetLastCol() {
   return String.fromCharCode(65 + SHEET_HEADERS.length - 1);
 }
 
+// Explicitly computes the next blank row rather than relying on Sheets' own values.append
+// endpoint, which finds the "table" to append after by scanning for the last *contiguous*
+// row with data — a blank row left behind by clearSheetRow() (used when deleting a synced
+// item) breaks that contiguity and can make append land on top of or near existing rows
+// instead of reliably at the bottom. Reading the full column A range instead always
+// reflects the true last row with any data, gaps included: the API returns an entry for
+// every row up to the last one with a value anywhere in the queried range, so a blank row
+// in the middle doesn't shrink what values.length reports.
+async function getNextEmptyRow(sheetId, token) {
+  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/A:A`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error('Could not read the sheet (error ' + res.status + ').');
+  const data = await res.json();
+  return (data.values || []).length + 1;
+}
+
 async function ensureHeaderRow(sheetId, token) {
   const lastCol = sheetLastCol();
   const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/A1:${lastCol}1`, {
@@ -283,15 +300,15 @@ async function appendOrUpdateSheetRow(asset, driveUrls, receiptUrls) {
     return asset.sheetRow;
   }
 
-  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${settings.sheetId}/values/A1:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
-    method: 'POST',
+  const nextRow = await getNextEmptyRow(settings.sheetId, token);
+  const range = `A${nextRow}:${sheetLastCol()}${nextRow}`;
+  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${settings.sheetId}/values/${range}?valueInputOption=RAW`, {
+    method: 'PUT',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ values: [row] }),
   });
   if (!res.ok) throw new Error('Could not log to the sheet (error ' + res.status + ').');
-  const data = await res.json();
-  const match = /![A-Z]+(\d+):/.exec(data.updates.updatedRange);
-  return match ? parseInt(match[1], 10) : null;
+  return nextRow;
 }
 
 // Blanks a row's cells rather than deleting the row outright — deleting would shift every
