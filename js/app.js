@@ -1353,8 +1353,20 @@ async function loadAssets() {
   if (activeView === 'export') renderExportSummary();
 }
 
+function renderAppVersion() {
+  const el = document.getElementById('app-version-label');
+  if (!el) return;
+  if (window.APP_VERSION && window.APP_VERSION.commit) {
+    const deployed = window.APP_VERSION.deployedAt ? new Date(window.APP_VERSION.deployedAt).toLocaleString() : '';
+    el.textContent = `Version ${window.APP_VERSION.commit}` + (deployed ? ` · deployed ${deployed}` : '');
+  } else {
+    el.textContent = 'Version: local build (no deploy info)';
+  }
+}
+
 switchView('capture');
 loadAssets();
+renderAppVersion();
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {

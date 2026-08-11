@@ -145,6 +145,8 @@
     <p class="item-meta">Upload photos/videos to a Drive folder you choose and log each item to a Google Sheet, signed in as you — no server involved.</p>
     <div id="google-sync-body"></div>
   </div>
+
+  <p class="item-meta" id="app-version-label" style="text-align:center;"></p>
 </section>
 
 <!-- TAB BAR -->
@@ -200,6 +202,9 @@
 <script src="https://apis.google.com/js/api.js"></script>
 
 <script src="js/db.js"></script>
+<!-- js/version.js is generated fresh by the Pages deploy workflow and doesn't exist in a
+     local checkout — that's fine, app.js shows "local build" when it's missing. -->
+<script src="js/version.js"></script>
 <script src="js/google-config.js"></script>
 <script src="js/google-sync.js"></script>
 <script src="js/app.js"></script>

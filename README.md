@@ -33,7 +33,9 @@ You can also just double-click `index.html` to try it without a server, but if i
 
 Once served over HTTPS and opened in Chrome (or Samsung Internet) on Android, use the browser menu → **Add to Home screen** / **Install app**. This installs it as a standalone app icon with no browser address bar, using the `manifest.json` and `sw.js` service worker in this repo. Your catalog data stays in the browser's IndexedDB either way — installing just changes how it's launched.
 
-## What it does
+### Checking which version you're running
+
+The bottom of the Export tab shows the deployed commit and deploy time (e.g. "Version a1b2c3d · deployed 8/11/2026, 3:15:00 PM"), generated fresh by the GitHub Actions deploy workflow each push — see `js/version.js` in the deployed site's source (not in this repo; it's gitignored and only exists after a deploy). A local checkout with no deploy workflow run shows "local build" instead. If something looks like it's not behaving like the latest deployed code, check this against the latest commit on `master` first — a mismatch usually means your browser/PWA is still running a stale cached version (see "network-first" in `sw.js`'s comments) rather than an actual bug.
 
 - **Capture** — add an item with a title, category, and a disposition: Keep, Gift/Designate, Sell, Donate/Recycle, or Discard. Disposition-specific fields appear as needed (recipient for Gift, platform/price for Sell, drop-off location for Donate). Attach **up to 3 photos/videos** to the item before saving it, via either:
   - **Camera** — an in-page live viewfinder (rear camera by default, Flip button for front/back) via `getUserMedia`, with a **Photo/Video mode toggle**. Photo mode is a shutter + retake/use review step; Video mode is a record/stop button with a recording timer (capped at 60 seconds per clip) that also requests microphone access. This is the standard camera pipeline the phone's browser exposes; there's no way for a web page to launch Samsung's own Camera app or its exclusive modes (100x zoom, night mode, etc.).

@@ -23,6 +23,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Generate version info
+        run: |
+          echo "window.APP_VERSION = { commit: '${GITHUB_SHA::7}', deployedAt: '$(date -u +%Y-%m-%dT%H:%M:%SZ)' };" > js/version.js
       - name: Setup Pages
         uses: actions/configure-pages@v5
         with:
