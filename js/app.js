@@ -1076,6 +1076,7 @@ function renderGoogleSyncCard() {
       <button type="button" class="secondary" id="google-sheet-create-btn">Create new sheet</button>
     </div>
     <button type="button" class="full" id="google-sync-all-btn" ${settings.folderId ? '' : 'disabled'}>Sync all items (${pendingCount} pending)</button>
+    <button type="button" class="secondary full" id="google-upload-backup-btn" style="margin-top:0.6rem;" ${settings.folderId ? '' : 'disabled'}>Upload backup to Drive</button>
   `;
 
   container.querySelector('#google-disconnect-btn').addEventListener('click', () => {
@@ -1133,6 +1134,24 @@ function renderGoogleSyncCard() {
     showToast(`Synced ${done} of ${pending.length} item${pending.length === 1 ? '' : 's'}`);
     await loadAssets();
   });
+
+  container.querySelector('#google-upload-backup-btn').addEventListener('click', async () => {
+    const btn = container.querySelector('#google-upload-backup-btn');
+    btn.disabled = true;
+    const originalText = btn.textContent;
+    try {
+      btn.textContent = 'Preparing backup…';
+      const { blob, filename } = await buildBackupBlob();
+      btn.textContent = 'Uploading…';
+      await GoogleSync.uploadBackup(blob, filename);
+      showToast('Backup uploaded to Drive');
+    } catch (err) {
+      showToast(err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  });
 }
 
 // ---------- backup / restore ----------
@@ -1150,7 +1169,9 @@ function dataUrlToBlob(dataUrl) {
   return fetch(dataUrl).then((res) => res.blob());
 }
 
-document.getElementById('btn-export-json').addEventListener('click', async () => {
+// Shared by the local download button and the "Upload backup to Drive" button in the
+// Google sync card, so both always produce an identical backup.
+async function buildBackupBlob() {
   const exportable = await Promise.all(assets.map(async (a) => {
     const copy = { ...a };
     copy.media = await Promise.all((a.media || []).map(async (m) => ({
@@ -1167,10 +1188,16 @@ document.getElementById('btn-export-json').addEventListener('click', async () =>
   }));
 
   const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), assets: exportable }, null, 2)], { type: 'application/json' });
+  const filename = `dostadning-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  return { blob, filename };
+}
+
+document.getElementById('btn-export-json').addEventListener('click', async () => {
+  const { blob, filename } = await buildBackupBlob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `dostadning-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
   showToast('Backup downloaded');

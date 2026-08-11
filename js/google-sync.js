@@ -337,6 +337,16 @@ function safeFilename(title) {
   return (title || 'item').replace(/[\\/:*?"<>|]/g, '_').slice(0, 80);
 }
 
+// Uploads the whole-database JSON backup (built by app.js's buildBackupBlob()) into the
+// same Drive folder as item media — a straight reuse of uploadFileToDrive, just under a
+// clearer name at the call site.
+async function uploadBackup(blob, filename) {
+  requireConfigured();
+  const settings = loadSyncSettings();
+  if (!settings.folderId) throw new Error('Choose a Google Drive folder first.');
+  return uploadFileToDrive(blob, filename, settings.folderId);
+}
+
 // ---------- top-level: sync one asset's media + receipts + log a row ----------
 
 async function uploadMediaList(mediaList, asset, folderId, filenameInfix, onProgress, uploadState) {
@@ -391,4 +401,5 @@ window.GoogleSync = {
   createNewSheet,
   syncAsset,
   clearSheetRow,
+  uploadBackup,
 };
