@@ -233,7 +233,7 @@ async function createNewSheet(title) {
   return { id: data.spreadsheetId, name: data.properties.title, url: data.spreadsheetUrl };
 }
 
-async function appendOrUpdateSheetRow(asset, driveUrl, receiptUrls) {
+async function appendOrUpdateSheetRow(asset, driveUrls, receiptUrls) {
   const settings = loadSyncSettings();
   if (!settings.sheetId) return null;
   const token = await getValidToken();
@@ -248,7 +248,7 @@ async function appendOrUpdateSheetRow(asset, driveUrl, receiptUrls) {
     asset.estimatedValue ? asset.estimatedValue + ' ' + (asset.currency || 'USD') : '',
     asset.dispositionType || '',
     asset.recipientName || '',
-    driveUrl || '',
+    (driveUrls || []).join(', '),
     new Date().toISOString(),
     (receiptUrls || []).join(', '),
   ];
@@ -338,7 +338,7 @@ async function syncAsset(asset, onProgress) {
   const mediaUrls = await uploadMediaList(media, asset, settings.folderId, '-', onProgress, uploadState);
   const receiptUrls = await uploadMediaList(receiptMedia, asset, settings.folderId, '-receipt-', onProgress, uploadState);
 
-  const rowNumber = await appendOrUpdateSheetRow(asset, mediaUrls[0] || null, receiptUrls);
+  const rowNumber = await appendOrUpdateSheetRow(asset, mediaUrls, receiptUrls);
   if (rowNumber) asset.sheetRow = rowNumber;
   asset.driveSyncedAt = new Date().toISOString();
   return asset;
