@@ -707,11 +707,13 @@ function openItemModal(id) {
     <input type="file" id="modal-receipt-input" accept="image/*" multiple style="display:none;">
 
     <div class="btn-row" style="margin-top:1rem;">
+      <button type="button" class="secondary" id="modal-edit-btn">Edit</button>
       <button class="danger" id="modal-delete-btn">Delete item</button>
     </div>
   `;
 
   modalContent.querySelector('#modal-close-btn').addEventListener('click', closeItemModal);
+  modalContent.querySelector('#modal-edit-btn').addEventListener('click', () => renderEditForm(asset));
   modalContent.querySelectorAll('.modal-gallery-remove').forEach((btn) => {
     btn.addEventListener('click', () => removeMediaFromAsset(asset.id, btn.dataset.mediaId, btn.dataset.field));
   });
@@ -761,6 +763,111 @@ function openItemModal(id) {
         loadAssets();
       });
     }
+  });
+
+  modalOverlay.classList.add('show');
+}
+
+function editDispositionFieldGroups() {
+  return {
+    Gift: document.getElementById('modal-edit-gift-fields'),
+    Sell: document.getElementById('modal-edit-sell-fields'),
+    Donate: document.getElementById('modal-edit-donate-fields'),
+  };
+}
+
+function updateEditDispositionFields() {
+  const groups = editDispositionFieldGroups();
+  const current = document.getElementById('modal-edit-disposition').value;
+  Object.values(groups).forEach((el) => { el.style.display = 'none'; });
+  if (groups[current]) groups[current].style.display = 'block';
+}
+
+function renderEditForm(asset) {
+  const categoryOptions = Array.from(document.getElementById('f-category').options)
+    .map((o) => `<option value="${o.value}" ${o.value === asset.category ? 'selected' : ''}>${o.textContent}</option>`)
+    .join('');
+  const dispositionOptions = DISPOSITIONS
+    .map((d) => `<option value="${d}" ${d === asset.dispositionType ? 'selected' : ''}>${DISPOSITION_LABELS[d]}</option>`)
+    .join('');
+  const currencyOptions = getCurrencyList()
+    .map((c) => `<option value="${c}" ${c === (asset.currency || DEFAULT_CURRENCY) ? 'selected' : ''}>${c}</option>`)
+    .join('');
+
+  modalContent.innerHTML = `
+    <button class="modal-close" id="modal-close-btn">Close</button>
+    <h3>Edit item</h3>
+
+    <label for="modal-edit-title">Item title</label>
+    <input type="text" id="modal-edit-title" value="${escapeHtml(asset.title)}" required>
+
+    <label for="modal-edit-category">Category</label>
+    <select id="modal-edit-category">${categoryOptions}</select>
+
+    <label for="modal-edit-disposition">Disposition</label>
+    <select id="modal-edit-disposition">${dispositionOptions}</select>
+
+    <div id="modal-edit-gift-fields" class="disposition-fields" style="display:none;">
+      <label for="modal-edit-recipient">Recipient</label>
+      <input type="text" id="modal-edit-recipient" placeholder="Name of family member or friend" value="${escapeHtml(asset.recipientName || '')}">
+    </div>
+
+    <div id="modal-edit-sell-fields" class="disposition-fields" style="display:none;">
+      <label for="modal-edit-platform">Sale platform</label>
+      <input type="text" id="modal-edit-platform" placeholder="e.g. Carousell, Facebook Marketplace" value="${escapeHtml(asset.platform || '')}">
+      <label for="modal-edit-asking-price">Asking price</label>
+      <input type="number" id="modal-edit-asking-price" min="0" step="0.01" placeholder="0.00" value="${escapeHtml(String(asset.askingPrice || ''))}">
+    </div>
+
+    <div id="modal-edit-donate-fields" class="disposition-fields" style="display:none;">
+      <label for="modal-edit-donate-location">Charity / recycling facility</label>
+      <input type="text" id="modal-edit-donate-location" placeholder="e.g. Salvation Army, e-waste center" value="${escapeHtml(asset.donateLocation || '')}">
+    </div>
+
+    <label for="modal-edit-value">Estimated value</label>
+    <div class="value-row">
+      <select id="modal-edit-currency">${currencyOptions}</select>
+      <input type="number" id="modal-edit-value" min="0" step="0.01" placeholder="0.00" value="${escapeHtml(String(asset.estimatedValue || ''))}">
+    </div>
+
+    <label for="modal-edit-notes">Notes</label>
+    <textarea id="modal-edit-notes" placeholder="Sentimental notes, condition, why this item goes to this person...">${escapeHtml(asset.notes || '')}</textarea>
+
+    <div class="btn-row" style="margin-top:1rem;">
+      <button type="button" class="secondary" id="modal-edit-cancel-btn">Cancel</button>
+      <button type="button" id="modal-edit-save-btn">Save changes</button>
+    </div>
+  `;
+
+  modalContent.querySelector('#modal-close-btn').addEventListener('click', closeItemModal);
+  document.getElementById('modal-edit-disposition').addEventListener('change', updateEditDispositionFields);
+  updateEditDispositionFields();
+
+  modalContent.querySelector('#modal-edit-cancel-btn').addEventListener('click', () => openItemModal(asset.id));
+
+  modalContent.querySelector('#modal-edit-save-btn').addEventListener('click', () => {
+    const title = document.getElementById('modal-edit-title').value.trim();
+    if (!title) {
+      showToast('Item title can\'t be empty');
+      return;
+    }
+    const disposition = document.getElementById('modal-edit-disposition').value;
+    asset.title = title;
+    asset.category = document.getElementById('modal-edit-category').value;
+    asset.dispositionType = disposition;
+    asset.recipientName = disposition === 'Gift' ? document.getElementById('modal-edit-recipient').value.trim() : '';
+    asset.platform = disposition === 'Sell' ? document.getElementById('modal-edit-platform').value.trim() : '';
+    asset.askingPrice = disposition === 'Sell' ? document.getElementById('modal-edit-asking-price').value : '';
+    asset.donateLocation = disposition === 'Donate' ? document.getElementById('modal-edit-donate-location').value.trim() : '';
+    asset.currency = document.getElementById('modal-edit-currency').value;
+    asset.estimatedValue = document.getElementById('modal-edit-value').value;
+    asset.notes = document.getElementById('modal-edit-notes').value.trim();
+    asset.updatedAt = new Date().toISOString();
+
+    AssetDB.put(asset).then(() => {
+      showToast('Saved changes to "' + asset.title + '"');
+      return loadAssets();
+    }).then(() => openItemModal(asset.id));
   });
 
   modalOverlay.classList.add('show');
