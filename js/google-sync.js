@@ -20,7 +20,7 @@ const GOOGLE_SCOPES = [
 // to Drive and is tracked in the app, it's just not listed in the sheet.
 const MAX_LINKED_MEDIA = 3;
 const SHEET_HEADERS = [
-  'Title', 'Category', 'Valuation', 'Disposition Status', 'Recipient',
+  'Title', 'Category', 'Valuation', 'Currency', 'Disposition Status', 'Recipient',
   'Drive Photo URL 1', 'Drive Photo URL 2', 'Drive Photo URL 3',
   'Receipt URL 1', 'Receipt URL 2', 'Receipt URL 3',
   'Logged At',
@@ -263,7 +263,8 @@ async function appendOrUpdateSheetRow(asset, driveUrls, receiptUrls) {
   const row = [
     asset.title || '',
     asset.category || '',
-    asset.estimatedValue ? asset.estimatedValue + ' ' + (asset.currency || 'USD') : '',
+    asset.estimatedValue || '',
+    asset.estimatedValue ? (asset.currency || 'USD') : '',
     asset.dispositionType || '',
     asset.recipientName || '',
     ...padUrls(driveUrls),
