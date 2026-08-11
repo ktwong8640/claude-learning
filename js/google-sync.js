@@ -13,10 +13,18 @@ const GOOGLE_SCOPES = [
   'https://www.googleapis.com/auth/spreadsheets',
 ].join(' ');
 
-// Receipt URLs is appended at the end (not inserted earlier) so that sheets already
-// connected before this column existed don't get their existing rows' columns shifted —
-// old rows just have that trailing cell blank until re-synced.
-const SHEET_HEADERS = ['Title', 'Category', 'Valuation', 'Disposition Status', 'Recipient', 'Drive Photo URL', 'Logged At', 'Receipt URLs'];
+// Each photo/receipt gets its own column (rather than comma-joining several URLs into one
+// cell) specifically so Google Sheets' hover-preview still works — it only recognizes a
+// cell as a previewable Drive link when the cell's *entire* content is that one URL.
+// MAX_LINKED_MEDIA caps how many of each get a column; anything beyond that still uploads
+// to Drive and is tracked in the app, it's just not listed in the sheet.
+const MAX_LINKED_MEDIA = 3;
+const SHEET_HEADERS = [
+  'Title', 'Category', 'Valuation', 'Disposition Status', 'Recipient',
+  'Drive Photo URL 1', 'Drive Photo URL 2', 'Drive Photo URL 3',
+  'Receipt URL 1', 'Receipt URL 2', 'Receipt URL 3',
+  'Logged At',
+];
 const SETTINGS_KEY = 'dostadning-google-sync';
 
 let tokenClient = null;
@@ -178,24 +186,28 @@ function extractSheetId(input) {
   return match ? match[0] : input.trim();
 }
 
+function sheetLastCol() {
+  return String.fromCharCode(65 + SHEET_HEADERS.length - 1);
+}
+
 async function ensureHeaderRow(sheetId, token) {
-  const lastCol = String.fromCharCode(65 + SHEET_HEADERS.length - 1); // 'H' for 8 headers
+  const lastCol = sheetLastCol();
   const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/A1:${lastCol}1`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   const data = await res.json();
   const existing = (data.values && data.values[0]) || [];
-  if (existing.length >= SHEET_HEADERS.length) return; // already has every header we need
+  const matches = existing.length === SHEET_HEADERS.length && SHEET_HEADERS.every((h, i) => existing[i] === h);
+  if (matches) return;
 
-  // Only fill in the missing trailing header(s) — never touch cells that already have
-  // content, so an older sheet's already-correct headers (and any custom columns a user
-  // added after them) are left alone.
-  const missing = SHEET_HEADERS.slice(existing.length);
-  const startCol = String.fromCharCode(65 + existing.length);
-  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${startCol}1:${lastCol}1?valueInputOption=RAW`, {
+  // Enforces the exact header text for every column this app knows about (A through
+  // lastCol) — including relabeling/repositioning columns from an older schema version —
+  // but never touches anything past lastCol, so custom columns a user added on their own
+  // are left alone.
+  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/A1:${lastCol}1?valueInputOption=RAW`, {
     method: 'PUT',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ values: [missing] }),
+    body: JSON.stringify({ values: [SHEET_HEADERS] }),
   });
 }
 
@@ -233,13 +245,19 @@ async function createNewSheet(title) {
   return { id: data.spreadsheetId, name: data.properties.title, url: data.spreadsheetUrl };
 }
 
+function padUrls(urls) {
+  const out = (urls || []).slice(0, MAX_LINKED_MEDIA);
+  while (out.length < MAX_LINKED_MEDIA) out.push('');
+  return out;
+}
+
 async function appendOrUpdateSheetRow(asset, driveUrls, receiptUrls) {
   const settings = loadSyncSettings();
   if (!settings.sheetId) return null;
   const token = await getValidToken();
   // Cheap idempotent check — upgrades an already-connected sheet's header the first time
-  // it's synced after a new trailing column is added, without requiring the user to
-  // manually reconnect it.
+  // it's synced after the schema changes, without requiring the user to manually
+  // reconnect it.
   await ensureHeaderRow(settings.sheetId, token);
 
   const row = [
@@ -248,13 +266,13 @@ async function appendOrUpdateSheetRow(asset, driveUrls, receiptUrls) {
     asset.estimatedValue ? asset.estimatedValue + ' ' + (asset.currency || 'USD') : '',
     asset.dispositionType || '',
     asset.recipientName || '',
-    (driveUrls || []).join(', '),
+    ...padUrls(driveUrls),
+    ...padUrls(receiptUrls),
     new Date().toISOString(),
-    (receiptUrls || []).join(', '),
   ];
 
   if (asset.sheetRow) {
-    const range = `A${asset.sheetRow}:H${asset.sheetRow}`;
+    const range = `A${asset.sheetRow}:${sheetLastCol()}${asset.sheetRow}`;
     const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${settings.sheetId}/values/${range}?valueInputOption=RAW`, {
       method: 'PUT',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
