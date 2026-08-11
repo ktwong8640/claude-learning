@@ -1036,6 +1036,29 @@ function isAssetSynced(asset) {
   return media.every((m) => !!m.driveUrl) && receiptMedia.every((m) => !!m.driveUrl);
 }
 
+// Shared by the "Sync all items" button and the pre-backup-upload check, so both walk
+// the same pending list the same way. Calls loadAssets() itself once done (which,  since
+// this only ever runs from the Export view, re-renders this whole card — any DOM element
+// reference a caller held before calling this is stale afterward and must be re-fetched.
+async function syncPendingAssets(onProgress) {
+  const pending = assets.filter((a) => !isAssetSynced(a));
+  let done = 0;
+  let error = null;
+  for (const asset of pending) {
+    if (onProgress) onProgress(asset, done, pending.length);
+    try {
+      await GoogleSync.syncAsset(asset);
+      await AssetDB.put(asset);
+      done++;
+    } catch (err) {
+      error = `Stopped on "${asset.title}": ${err.message}`;
+      break;
+    }
+  }
+  await loadAssets();
+  return { done, total: pending.length, error };
+}
+
 function renderGoogleSyncCard() {
   const container = document.getElementById('google-sync-body');
   if (!container) return;
@@ -1118,33 +1141,48 @@ function renderGoogleSyncCard() {
 
   container.querySelector('#google-sync-all-btn').addEventListener('click', async () => {
     const btn = container.querySelector('#google-sync-all-btn');
-    const pending = assets.filter((a) => !isAssetSynced(a));
-    let done = 0;
-    for (const asset of pending) {
-      btn.textContent = `Syncing "${asset.title}"… (${done + 1}/${pending.length})`;
-      try {
-        await GoogleSync.syncAsset(asset);
-        await AssetDB.put(asset);
-        done++;
-      } catch (err) {
-        showToast('Stopped on "' + asset.title + '": ' + err.message);
-        break;
-      }
-    }
-    showToast(`Synced ${done} of ${pending.length} item${pending.length === 1 ? '' : 's'}`);
-    await loadAssets();
+    const result = await syncPendingAssets((asset, i, total) => {
+      btn.textContent = `Syncing "${asset.title}"… (${i + 1}/${total})`;
+    });
+    showToast(result.error || `Synced ${result.done} of ${result.total} item${result.total === 1 ? '' : 's'}`);
   });
 
   container.querySelector('#google-upload-backup-btn').addEventListener('click', async () => {
+    const originalText = container.querySelector('#google-upload-backup-btn').textContent;
+    const pending = assets.filter((a) => !isAssetSynced(a));
+    let syncedFirst = false;
+
+    if (pending.length > 0) {
+      const noun = pending.length === 1 ? 'item hasn\'t' : 'items haven\'t';
+      const wantsSync = confirm(
+        `${pending.length} ${noun} been synced to Google Drive/Sheets yet.\n\n` +
+        `Sync ${pending.length === 1 ? 'it' : 'them'} now before uploading the backup? ` +
+        `(The backup itself always includes every item either way — this just keeps Drive/Sheets in sync too.)`
+      );
+      if (wantsSync) {
+        const syncBtn = container.querySelector('#google-upload-backup-btn');
+        syncBtn.disabled = true;
+        const result = await syncPendingAssets((asset, i, total) => {
+          syncBtn.textContent = `Syncing "${asset.title}"… (${i + 1}/${total})`;
+        });
+        // syncPendingAssets() called loadAssets(), which re-rendered this whole card —
+        // the button reference above is now detached; re-fetch before continuing.
+        if (result.error) {
+          showToast(result.error + ' — backup not uploaded.');
+          return;
+        }
+        syncedFirst = true;
+      }
+    }
+
     const btn = container.querySelector('#google-upload-backup-btn');
     btn.disabled = true;
-    const originalText = btn.textContent;
+    btn.textContent = 'Preparing backup…';
     try {
-      btn.textContent = 'Preparing backup…';
       const { blob, filename } = await buildBackupBlob();
       btn.textContent = 'Uploading…';
       await GoogleSync.uploadBackup(blob, filename);
-      showToast('Backup uploaded to Drive');
+      showToast(syncedFirst ? 'Synced pending items and uploaded backup to Drive' : 'Backup uploaded to Drive');
     } catch (err) {
       showToast(err.message);
     } finally {
