@@ -6,6 +6,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Döstädning — a mobile-friendly Swedish Death Cleaning (estate cleaning) catalog app. Users attach up to 3 photos/videos (and up to 3 receipt images) to each belonging and assign it a disposition (Keep, Gift, Sell, Donate, Discard), then export a printable inventory for family/executors, and optionally sync items to Google Drive/Sheets. See [README.md](README.md) for the full feature list and data model.
 
+## Commands
+
+There is no build, lint, or test command/framework in this repo (no `package.json`). Everything below is the whole workflow:
+
+```
+npx serve .                # or: python -m http.server 8000
+```
+
+Then open the printed URL. Camera capture (`getUserMedia`) needs a secure context, so `http://localhost:<port>` works for camera testing but `http://<lan-ip>:<port>` and `file://` only get the gallery-picker fallback — deploy (GitHub Pages/Netlify/Vercel) or tunnel (`ngrok`/`localtunnel`) to test the live camera on a real phone. Verify changes by exercising the page directly in a browser; there's nothing else to run.
+
+`git push` to `master` (or `feature/dostadning-estate-catalog`) triggers `.github/workflows/deploy-pages.yml`, which generates `js/version.js` (commit + build time) and deploys to GitHub Pages — this is the only CI in the repo.
+
 ## Architecture
 
 Plain HTML/CSS/JavaScript, no build step, no dependencies, no backend server:
